@@ -15,6 +15,9 @@ wheels/
 # LLM prompt logs
 .llm_logs/
 
+# Logs
+.logs/
+
 # Environment
 .env
 players.json
