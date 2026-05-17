@@ -75,3 +75,4 @@ class ClassifiedMatch(BaseModel):
     stats: PlayerStats = PlayerStats()
     lane: str = "?"
     hero_name: str = "Unknown"
+    match_detail: MatchDetail | None = None

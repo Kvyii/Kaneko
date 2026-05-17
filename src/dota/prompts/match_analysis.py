@@ -1,0 +1,101 @@
+"""Match analysis prompt builder for LLM consumption."""
+
+import json
+from pathlib import Path
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+
+
+def _load_game_modes() -> dict[int, str]:
+    """Load game mode mappings from data/game_mode.json."""
+    with open(DATA_DIR / "game_mode.json") as f:
+        modes = json.load(f)
+    return {
+        int(k): v["name"].replace("game_mode_", "").replace("_", " ").title()
+        for k, v in modes.items()
+    }
+
+
+SYSTEM_PROMPT = """You are a Dota 2 match analyst. You will receive match data from the OpenDota API as JSON.
+
+Analyse the game from the perspective of the following player:
+
+Team: {team}
+Hero: {hero_name}
+K/D/A: {kills}/{deaths}/{assists}
+GPM: {gpm} | XPM: {xpm}
+Last Hits/Denies: {last_hits}/{denies}
+LH@10: {lh_at_10}
+Net Worth: {net_worth}
+Lane: {lane}
+Game Mode: {game_mode}
+
+Keep in mind the following when analyzing the match:
+- Consider game mode and the impact this has.
+- The draft and line up. 
+- Remember that this is a team game, and individual performance is often influenced by team dynamics and coordination.
+- The phases of the game (early, mid, late) and the requirements to ensure success in each phase (wards, vision, smoke).
+- The timing and power spikes of each hero. E.g. support heroes often have a significant impact in the early game, while carry heroes typically become more influential in the mid to late game.
+
+Response guidelines:
+- Respond using markdown formatting.
+
+The response should be broken down into the following sections:
+
+# Match Summary
+- Overall match dynamics and key turning points (use "Gold Advantage to Radiant (per Minute)" to identify momentum shifts).
+- Lane outcomes.
+- Any match level insights.
+
+# Player Performance Analysis
+- The expected performance of this hero in this draft. 
+    - E.g. The presence of enemy hard counters, or the presence of allies that synergise well with this hero.
+- Performance of this player in this game, focusing on their role, impact on the game, and how they contributed to the team's success or failure.
+    - This analysis should include an assessment of the team to also contribute to their performance if applicable.
+    - Carry/offlane heros should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency and performance.
+    - Mid heros should include an assessment of t he lane efficiency
+    - E.g. Carry heros need space and timings to be brought online. Supports need front line to be able to sustain. 
+- Comparison against the players on the other team that are in the same role (e.g. offlane vs offlane, mid vs mid etc.)
+- If there is any Rank Tier information available, you may factor that information in. 
+
+# Core reasons for the match outcome (win/loss)
+- Combine your findings above to identify the core reasons for the match outcome. 
+    - E.g. if the player performed well but the team lost, then the core reason may be that the other players on the team underperformed, or that the opposing team outperformed in a way that countered this player's performance.
+- Major factors for the game outcome, such as throws / comebacks, key player contributions, suboptimal players, draft etc.
+
+
+
+Match data below:
+{match_data}
+"""
+
+
+def build_system_prompt(
+    player_data: dict,
+    team: str,
+    match_json: dict,
+) -> str:
+    """Build the system prompt with player context and match data filled in."""
+    mode_value = match_json.get("match_data", {}).get("Game Mode", "Unknown")
+    if isinstance(mode_value, str):
+        game_mode = mode_value
+    else:
+        game_modes = _load_game_modes()
+        game_mode = game_modes.get(mode_value, f"Unknown ({mode_value})")
+
+    return SYSTEM_PROMPT.format(
+        team=team,
+        hero_name=player_data.get("Hero", "Unknown"),
+        kills=player_data.get("Kills", 0),
+        deaths=player_data.get("Deaths", 0),
+        assists=player_data.get("Assists", 0),
+        gpm=player_data.get("GPM", 0),
+        xpm=player_data.get("XPM", 0),
+        last_hits=player_data.get("Last Hits", 0),
+        denies=player_data.get("Denies", 0),
+        lh_at_10=player_data.get("lh_at_10", "N/A"),
+        net_worth=player_data.get("Net Worth", 0),
+        lane=player_data.get("Lane", "?"),
+        game_mode=game_mode,
+        match_data=json.dumps(match_json, indent=2),
+    )
