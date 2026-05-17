@@ -1,6 +1,9 @@
 from datetime import datetime, timezone, timedelta
+from typing import Callable
 
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.table import Table
 
 from dota.models.match import ClassifiedMatch
@@ -138,7 +141,11 @@ def display_detail(cm: ClassifiedMatch, console: Console) -> None:
     console.print(table)
 
 
-def prompt_detail(matches: list[ClassifiedMatch], console: Console) -> None:
+def prompt_detail(
+    matches: list[ClassifiedMatch],
+    console: Console,
+    analyze_fn: Callable[[int], str] | None = None,
+) -> None:
     """Prompt user to select a match for detailed view."""
     count = len(matches)
     console.print()
@@ -153,12 +160,39 @@ def prompt_detail(matches: list[ClassifiedMatch], console: Console) -> None:
         if choice == str(count + 1):
             return
         if choice.isdigit() and 1 <= int(choice) <= count:
-            display_detail(matches[int(choice) - 1], console)
+            cm = matches[int(choice) - 1]
+            display_detail(cm, console)
+
+            # Warn if match is not fully parsed
+            if not cm.match_detail or not cm.match_detail.radiant_gold_adv:
+                console.print(
+                    "\n[yellow]⚠ This match has not been fully parsed. "
+                    "AI analysis may be incomplete.[/yellow]"
+                )
+
+            # Offer AI analysis
+            if analyze_fn:
+                ai_choice = console.input(
+                    "\nAnalyze with AI? (y/n): "
+                ).strip().lower()
+                if ai_choice == "y":
+                    console.print("\n[dim]Requesting AI analysis...[/dim]")
+                    try:
+                        result = analyze_fn(cm.match.match_id)
+                        console.print()
+                        console.print(Panel(Markdown(result), title="AI Analysis"))
+                    except RuntimeError as e:
+                        console.print(f"\n[red]{e}[/red]")
+
             return
         console.print(f"[red]Please enter a number between 1 and {count + 1}[/red]")
 
 
-def display_matches(matches: list[ClassifiedMatch], console: Console) -> None:
+def display_matches(
+    matches: list[ClassifiedMatch],
+    console: Console,
+    analyze_fn: Callable[[int], str] | None = None,
+) -> None:
     """Display summary then offer detailed view."""
     display_summary(matches, console)
-    prompt_detail(matches, console)
+    prompt_detail(matches, console, analyze_fn=analyze_fn)

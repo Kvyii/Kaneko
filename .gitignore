@@ -11,3 +11,9 @@ wheels/
 
 # Match cache
 .opendota_cache/
+
+# LLM prompt logs
+.llm_logs/
+
+# Environment
+.env

@@ -10,7 +10,7 @@ BASE_URL = "https://api.opendota.com/api"
 
 class OpenDotaClient:
     def __init__(self) -> None:
-        self._sync = httpx.Client()
+        self._sync = httpx.Client(timeout=30.0)
 
     def close(self) -> None:
         self._sync.close()
@@ -43,24 +43,27 @@ class OpenDotaClient:
             to_fetch = match_ids
 
         if to_fetch:
-            fetched = asyncio.run(self._fetch_match_details_async(to_fetch))
+            fetched = asyncio.run(self._fetch_match_details_async(to_fetch, cache))
             for mid, detail in fetched.items():
-                if cache:
-                    cache.put(mid, detail)
                 results[mid] = detail
 
         return results
 
-    async def _fetch_match_details_async(self, match_ids: list[int]) -> dict[int, MatchDetail]:
+    async def _fetch_match_details_async(
+        self, match_ids: list[int], cache: MatchCache | None = None
+    ) -> dict[int, MatchDetail]:
         results = {}
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             tasks = [client.get(f"{BASE_URL}/matches/{mid}") for mid in match_ids]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
             for mid, resp in zip(match_ids, responses):
                 if isinstance(resp, Exception):
                     continue
                 if resp.status_code == 200:
-                    results[mid] = MatchDetail(**resp.json())
+                    raw = resp.json()
+                    if cache:
+                        cache.put_raw(mid, raw)
+                    results[mid] = MatchDetail(**raw)
         return results
 
     def request_parse(self, match_ids: list[int]) -> list[int]:

@@ -156,6 +156,7 @@ def build_classified_matches(
                 stats=stats,
                 lane=lane,
                 hero_name=hero_name,
+                match_detail=detail,
             )
         )
     return results
