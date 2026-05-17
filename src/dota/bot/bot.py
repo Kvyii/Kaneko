@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from pathlib import Path
 
 import discord
@@ -16,7 +17,7 @@ from dota.llm.prepare import enrich_match_data
 from dota.prompts.match_analysis import build_system_prompt
 
 from dota.bot.players import PlayerRegistry
-from dota.bot.embeds import build_summary_embeds, build_detail_embed, build_analysis_embeds
+from dota.bot.embeds import build_summary_embeds, build_detail_embed, build_analysis_embeds, format_date_discord
 from dota.bot.usage import UsageTracker
 
 log = logging.getLogger("dota.bot")
@@ -25,7 +26,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 NUMBER_EMOJIS = ["1\ufe0f\u20e3", "2\ufe0f\u20e3", "3\ufe0f\u20e3", "4\ufe0f\u20e3", "5\ufe0f\u20e3"]
 BRAIN_EMOJI = "\U0001f9e0"
-REACTION_TIMEOUT = 15.0  # seconds
+REACTION_TIMEOUT = 25.0  # seconds
 OWNER_DISCORD_ID = 227439391147032576
 
 
@@ -250,22 +251,32 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     except Exception:
         log.warning("Failed to fetch weekly W/L — player_id=%d", player_id, exc_info=True)
 
-    # Fetch recent matches
-    log.info("Fetching recent matches — player_id=%d, limit=5", player_id)
+    # Fetch recent matches — request enough to cover the week for game time
+    weekly_total = wl.get("win", 0) + wl.get("lose", 0)
+    fetch_limit = max(5, weekly_total)
+    log.info("Fetching recent matches — player_id=%d, limit=%d", player_id, fetch_limit)
     try:
-        matches = await bot.client.fetch_recent_matches_async(player_id, limit=5)
+        all_recent = await bot.client.fetch_recent_matches_async(player_id, limit=fetch_limit)
         api_calls += 1
     except Exception:
         log.error("Failed to fetch recent matches — player_id=%d", player_id, exc_info=True)
         await interaction.followup.send("Failed to fetch matches.")
         return
 
-    if not matches:
+    if not all_recent:
         log.info("No recent matches found — player_id=%d", player_id)
         await interaction.followup.send("No recent matches found.")
         return
 
-    log.info("Fetched %d recent matches — match_ids=%s", len(matches), [m.match_id for m in matches])
+    matches = all_recent[:5]
+    log.info("Fetched %d recent matches — displaying %d, match_ids=%s",
+             len(all_recent), len(matches), [m.match_id for m in matches])
+
+    # Calculate weekly game time from the fetched matches
+    weekly_seconds = 0
+    cutoff = int(time.time()) - 7 * 86400
+    weekly_seconds = sum(m.duration for m in all_recent if m.start_time >= cutoff)
+    log.info("Weekly game time — total %d seconds", weekly_seconds)
 
     # Fetch match details
     match_ids = [m.match_id for m in matches]
@@ -282,7 +293,12 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     ]
     if unparsed:
         log.info("Requesting parse for unparsed matches — %s", unparsed)
-        ids_list = "\n".join(f"- `{mid}`" for mid in unparsed)
+        match_by_id = {m.match_id: m for m in matches}
+        ids_list = "\n".join(
+            f"- `{mid}` — {format_date_discord(match_by_id[mid].start_time)}"
+            if mid in match_by_id else f"- `{mid}`"
+            for mid in unparsed
+        )
         try:
             await bot.client.request_parse_async(unparsed)
             api_calls += len(unparsed)
@@ -305,7 +321,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     summary_embeds = build_summary_embeds(
         name, turbo_mmr, classified,
         hero_icons=bot.hero_icons, avatar_url=avatar,
-        weekly_wl=wl,
+        weekly_wl=wl, weekly_seconds=weekly_seconds,
     )
     message = await interaction.followup.send(embeds=summary_embeds, wait=True)
     log.info("Summary embed sent — message_id=%s", message.id)

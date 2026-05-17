@@ -76,7 +76,9 @@ class Contribution(BaseModel):
 
 
 class PlayerStats(BaseModel):
+    hero_damage: int = 0
     tower_damage: int = 0
+    damage_taken: int = 0
     hero_healing: int = 0
     gpm: int = 0
     xpm: int = 0

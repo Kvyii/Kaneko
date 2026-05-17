@@ -41,6 +41,7 @@ Response guidelines:
 - Respond using markdown formatting.
 - Use bullet points and subheadings to structure your analysis clearly.
 - Keep each section to 5 core reasons or insights, prioritising the most impactful ones.
+- Report numbers in thousands using the k suffix (e.g. 1500 as 1.5k). One decimal place.
 - You MUST structure your response using exactly these three section headers (with the exact heading text):
 
 # Match Summary
