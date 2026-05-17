@@ -38,10 +38,12 @@ def _match_description(cm: ClassifiedMatch) -> str:
     type_icon = TYPE_EMOJI.get(cm.match_type, "")
     display_type = "Threw" if cm.match_type == "Throw" else cm.match_type
 
+    party = f"Party: **{s.party_size}**" if s.party_size > 1 else "Solo"
+
     return (
         f"{_format_date_discord(m.start_time)}\n"
         f"{result} - {display_type} {type_icon}\n"
-        f"KDA: {m.kills}/{m.deaths}/{m.assists}\n"
+        f"KDA: {m.kills}/{m.deaths}/{m.assists}  |  {party}\n"
         f"Length: {format_duration(m.duration)}\n"
         f"LH/DN: **{s.last_hits}/{s.denies}**\n"
         f"GPM: **{s.gpm}**  |  XPM: **{s.xpm}**\n"
@@ -110,11 +112,10 @@ def build_detail_embed(
     c = cm.contribution
 
     color = discord.Color.green() if m.won else discord.Color.red()
-    result = "\u2705 Win" if m.won else "\u274c Loss"
     type_icon = TYPE_EMOJI.get(cm.match_type, "")
 
     embed = discord.Embed(
-        title=f"{cm.hero_name} ({cm.lane})  \u2014  {result}",
+        title=f"{cm.hero_name} ({cm.lane})",
         color=color,
     )
     if hero_icon_url:
@@ -122,6 +123,7 @@ def build_detail_embed(
 
     embed.add_field(name="K/D/A", value=f"**{m.kills}/{m.deaths}/{m.assists}**")
     embed.add_field(name="GPM / XPM", value=f"{s.gpm} / {s.xpm}")
+    embed.add_field(name="Net Worth", value=fmt_gold(s.net_worth))
     embed.add_field(name="LH/DN", value=f"{s.last_hits}/{s.denies}")
     embed.add_field(
         name="LH@10", value=str(s.lh_at_10) if s.lh_at_10 is not None else "-"
@@ -131,14 +133,17 @@ def build_detail_embed(
     embed.add_field(name="Type", value=f"{type_icon} {display_type}")
     embed.add_field(name="Max Lead", value=fmt_gold(cm.peak_lead))
     embed.add_field(name="Max Deficit", value=fmt_gold(cm.peak_deficit))
-    embed.add_field(name="Tower Dmg", value=fmt_gold(s.tower_damage))
     embed.add_field(name="Healing", value=fmt_gold(s.hero_healing))
     embed.add_field(name="Time Dead", value=format_duration(s.time_dead))
-    embed.add_field(name="\u200b", value="\u200b")
+    embed.add_field(name="APM", value=str(s.apm) if s.apm > 0 else "-")
+    streak_val = str(s.longest_kill_streak) if s.longest_kill_streak > 0 else "-"
+    embed.add_field(name="Kill Streak", value=streak_val)
 
     embed.add_field(name="\u200b\nTeam Contribution", value="\u200b", inline=False)
-    embed.add_field(name="Fight", value=fmt_pct(c.fight))
+    embed.add_field(name="Participation", value=fmt_pct(c.fight))
     embed.add_field(name="Damage", value=fmt_pct(c.damage))
+    embed.add_field(name="Tower Dmg", value=fmt_pct(c.tower_damage))
+    embed.add_field(name="Dmg Taken", value=fmt_pct(c.damage_taken))
     embed.add_field(name="Vision", value=fmt_pct(c.vision))
     embed.add_field(name="Stuns", value=fmt_pct(c.stuns))
     embed.add_field(name="Lane Eff", value=fmt_pct(c.lane_eff))
