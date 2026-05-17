@@ -72,7 +72,19 @@ class DotaBot(discord.Client):
     async def setup_hook(self) -> None:
         self.tree.add_command(_register)
         self.tree.add_command(_info)
-        await self.tree.sync()
+        self.tree.add_command(_usage)
+        # Sync to specific guilds for instant command updates
+        guild_env = os.environ.get("DISCORD_GUILD_IDS", "")
+        guild_ids = [int(g) for g in guild_env.split(",") if g.strip()]
+        if guild_ids:
+            for guild_id in guild_ids:
+                guild = discord.Object(id=guild_id)
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                log.info("Synced commands to guild %d", guild_id)
+        else:
+            await self.tree.sync()
+            log.info("Synced commands globally")
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (ID: %s)", self.user, self.user.id)
@@ -105,6 +117,57 @@ async def _register(interaction: discord.Interaction, player_id: int) -> None:
         color=discord.Color.green(),
     )
     await interaction.followup.send(embed=embed)
+
+
+@app_commands.command(name="usage", description="Show your bot usage stats")
+async def _usage(interaction: discord.Interaction) -> None:
+    user_id = interaction.user.id
+    log.info("/usage by %s (%s)", interaction.user, user_id)
+    bot.usage.record_command(user_id, "usage")
+
+    stats = bot.usage.get_usage(user_id)
+    max_info, max_llm = bot.registry.get_limits(user_id)
+
+    # Lifetime command usage
+    cmds = stats["commands"]
+    cmd_lines = []
+    for name, count in sorted(cmds.items()):
+        cmd_lines.append(f"/{name}: **{count}**")
+    cmd_text = "\n".join(cmd_lines) if cmd_lines else "None"
+
+    # Remaining calls this hour
+    info_remaining = max(0, max_info - stats["info_this_hour"])
+    llm_remaining = max(0, max_llm - stats["llm_this_hour"])
+    secs = stats["seconds_until_refresh"]
+    mins = secs // 60
+    secs = secs % 60
+
+    embed = discord.Embed(
+        title=f"Usage — {interaction.user.display_name}",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="Lifetime Commands",
+        value=cmd_text,
+        inline=False,
+    )
+    embed.add_field(
+        name="API Calls (lifetime)",
+        value=f"**{stats['api_calls']}**",
+        inline=True,
+    )
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    embed.add_field(
+        name="Remaining This Hour",
+        value=(
+            f"/info: **{info_remaining}** / {max_info}\n"
+            f"AI analysis: **{llm_remaining}** / {max_llm}\n"
+            f"Refresh in **{mins}m {secs}s**"
+        ),
+        inline=False,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @app_commands.command(name="info", description="Show your recent Dota 2 matches")

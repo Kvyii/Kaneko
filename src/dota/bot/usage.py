@@ -5,7 +5,8 @@ from pathlib import Path
 
 log = logging.getLogger("dota.bot.usage")
 
-USAGE_FILE = Path(__file__).resolve().parent.parent.parent.parent / "usage.json"
+LOGS_DIR = Path(__file__).resolve().parent.parent.parent.parent / ".logs"
+USAGE_FILE = LOGS_DIR / "usage.json"
 
 
 def _current_hour() -> str:
@@ -32,6 +33,7 @@ class UsageTracker:
             log.info("No usage file found at %s — starting fresh", self._path)
 
     def _save(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(self._data, indent=2))
 
     def _ensure_user(self, discord_id: int) -> dict:
@@ -97,6 +99,20 @@ class UsageTracker:
         user = self._ensure_user(discord_id)
         self._record_command(user, name)
         self._save()
+
+    def get_usage(self, discord_id: int) -> dict:
+        """Return usage stats for a user: commands, api_calls, current hour counts."""
+        user = self._ensure_user(discord_id)
+        hour = _current_hour()
+        info_this_hour = user.get("info_count", 0) if user.get("info_hour") == hour else 0
+        llm_this_hour = user.get("llm_count", 0) if user.get("llm_hour") == hour else 0
+        return {
+            "commands": dict(user.get("commands", {})),
+            "api_calls": user.get("api_calls", 0),
+            "info_this_hour": info_this_hour,
+            "llm_this_hour": llm_this_hour,
+            "seconds_until_refresh": _seconds_until_next_hour(),
+        }
 
     def _record_command(self, user: dict, name: str) -> None:
         cmds = user.setdefault("commands", {})
