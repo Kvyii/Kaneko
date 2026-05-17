@@ -179,8 +179,20 @@ def prompt_detail(
                     console.print("\n[dim]Requesting AI analysis...[/dim]")
                     try:
                         result = analyze_fn(cm.match.match_id)
-                        console.print()
-                        console.print(Panel(Markdown(result), title="AI Analysis"))
+                        section_titles = {
+                            "match_summary": "Match Summary",
+                            "player_performance": "Player Performance",
+                            "core_reasons": "Core Reasons",
+                        }
+                        if isinstance(result, dict):
+                            for key in ("match_summary", "player_performance", "core_reasons"):
+                                text = result.get(key, "")
+                                if text:
+                                    console.print()
+                                    console.print(Panel(Markdown(text), title=section_titles[key]))
+                        else:
+                            console.print()
+                            console.print(Panel(Markdown(result), title="AI Analysis"))
                     except RuntimeError as e:
                         console.print(f"\n[red]{e}[/red]")
 

@@ -30,20 +30,21 @@ def classify_match(
     max_lead = max(team_adv)
     max_deficit = min(team_adv)
 
-    lead_ratio = max_lead / abs(max_deficit) if max_deficit < 0 else float("inf")
-    deficit_ratio = abs(max_deficit) / max_lead if max_lead > 0 else float("inf")
+    swing = max_lead + abs(max_deficit) if max_deficit < 0 else max_lead
+    lead_pct = max_lead / swing if swing > 0 else 0
+    deficit_pct = abs(max_deficit) / swing if swing > 0 else 0
 
     if match.won:
-        if max_deficit < -5000 and deficit_ratio > 0.5:
+        if max_deficit < -5000 and deficit_pct >= 0.5:
             match_type = "Comeback"
-        elif max_lead > 8000 and lead_ratio > 1.5:
+        elif max_lead > 8000 and lead_pct >= 0.5:
             match_type = "Stomp"
         else:
             match_type = "Even"
     else:
-        if max_lead > 5000 and lead_ratio > 0.5:
+        if max_lead > 5000 and lead_pct >= 0.5:
             match_type = "Throw"
-        elif max_deficit < -8000 and deficit_ratio > 1.5:
+        elif max_deficit < -8000 and deficit_pct >= 0.5:
             match_type = "Stomped"
         else:
             match_type = "Even"
@@ -68,10 +69,9 @@ def compute_contribution(
     if not teammates:
         return contrib
 
-    # Fight: (kills + assists) / team total kills
-    team_kills = sum(p.kills for p in teammates)
-    if team_kills > 0:
-        contrib.fight = (player.kills + player.assists) / team_kills * 100
+    # Participation: from OpenDota teamfight_participation (0-1 float)
+    if player.teamfight_participation > 0:
+        contrib.fight = player.teamfight_participation * 100
 
     # Damage: hero_damage / team total
     team_damage = sum(p.hero_damage for p in teammates)
@@ -92,6 +92,16 @@ def compute_contribution(
     # Lane efficiency
     if player.lane_efficiency is not None:
         contrib.lane_eff = player.lane_efficiency * 100
+
+    # Tower damage: tower_damage / team total
+    team_tower_dmg = sum(p.tower_damage for p in teammates)
+    if team_tower_dmg > 0:
+        contrib.tower_damage = player.tower_damage / team_tower_dmg * 100
+
+    # Damage taken: total_damage_taken / team total
+    team_dmg_taken = sum(p.total_damage_taken for p in teammates)
+    if team_dmg_taken > 0:
+        contrib.damage_taken = player.total_damage_taken / team_dmg_taken * 100
 
     return contrib
 
@@ -128,6 +138,10 @@ def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerSt
         denies=player.denies,
         lh_at_10=lh_at_10,
         time_dead=player.life_state_dead,
+        net_worth=player.net_worth,
+        party_size=player.party_size,
+        longest_kill_streak=player.longest_kill_streak,
+        apm=player.actions_per_min,
     )
 
 

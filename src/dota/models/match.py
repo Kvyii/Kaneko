@@ -39,6 +39,24 @@ class PlayerDetail(BaseModel):
     denies: int = 0
     lh_t: list[int] | None = None
     life_state_dead: int = 0
+    party_size: int = 1
+    net_worth: int = 0
+    damage_taken: dict[str, int] | None = None
+    kill_streaks: dict[str, int] | None = None
+    actions_per_min: int = 0
+    teamfight_participation: float = 0
+
+    @property
+    def longest_kill_streak(self) -> int:
+        if not self.kill_streaks:
+            return 0
+        return max(int(k) for k in self.kill_streaks)
+
+    @property
+    def total_damage_taken(self) -> int:
+        if not self.damage_taken:
+            return 0
+        return sum(self.damage_taken.values())
 
 
 class MatchDetail(BaseModel):
@@ -53,6 +71,8 @@ class Contribution(BaseModel):
     vision: float | None = None
     stuns: float | None = None
     lane_eff: float | None = None
+    tower_damage: float | None = None
+    damage_taken: float | None = None
 
 
 class PlayerStats(BaseModel):
@@ -64,6 +84,10 @@ class PlayerStats(BaseModel):
     denies: int = 0
     lh_at_10: int | None = None
     time_dead: int = 0
+    net_worth: int = 0
+    party_size: int = 1
+    longest_kill_streak: int = 0
+    apm: int = 0
 
 
 class ClassifiedMatch(BaseModel):
