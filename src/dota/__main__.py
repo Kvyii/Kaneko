@@ -5,6 +5,7 @@ from rich.console import Console
 
 from dota.api.client import OpenDotaClient
 from dota.analysis.classifier import build_classified_matches
+from dota.cache import MatchCache
 from dota.config import load_config
 from dota.display.table import display_matches
 
@@ -23,6 +24,7 @@ def load_heroes() -> dict[str, str]:
 def main() -> None:
     console = Console()
     config = load_config()
+    cache = MatchCache()
     client = OpenDotaClient()
 
     try:
@@ -43,7 +45,7 @@ def main() -> None:
 
         match_ids = [m.match_id for m in matches]
         console.print("Fetching match details...")
-        details = client.fetch_match_details(match_ids)
+        details = client.fetch_match_details(match_ids, cache=cache)
 
         # Request parsing for unparsed matches
         unparsed = [
