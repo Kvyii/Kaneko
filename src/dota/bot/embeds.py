@@ -8,7 +8,7 @@ from dota.models.match import ClassifiedMatch
 AEST = timezone(timedelta(hours=10))
 
 
-def _format_date_discord(timestamp: int) -> str:
+def format_date_discord(timestamp: int) -> str:
     """Format as 'Tuesday 25 May - 2:43AM'."""
     dt = datetime.fromtimestamp(timestamp, tz=AEST)
     hour = dt.hour % 12 or 12
@@ -41,7 +41,7 @@ def _match_description(cm: ClassifiedMatch) -> str:
     party = f"Party: **{s.party_size}**" if s.party_size > 1 else "Solo"
 
     return (
-        f"{_format_date_discord(m.start_time)}\n"
+        f"{format_date_discord(m.start_time)}\n"
         f"{result} - {display_type} {type_icon}\n"
         f"KDA: {m.kills}/{m.deaths}/{m.assists}  |  {party}\n"
         f"Length: {format_duration(m.duration)}\n"
@@ -59,6 +59,7 @@ def build_summary_embeds(
     hero_icons: dict[str, str] | None = None,
     avatar_url: str | None = None,
     weekly_wl: dict | None = None,
+    weekly_seconds: int = 0,
 ) -> list[discord.Embed]:
     title = f"{player_name}"
     if turbo_mmr is not None:
@@ -74,6 +75,10 @@ def build_summary_embeds(
             loss_pct = losses / total * 100
             lines.append(f"Games this week: **{total}**")
             lines.append(f"Wins: **{wins}** ({win_pct:.0f}%)  |  Losses: **{losses}** ({loss_pct:.0f}%)")
+    if weekly_seconds > 0:
+        hours = weekly_seconds // 3600
+        mins = (weekly_seconds % 3600) // 60
+        lines.append(f"Game time: **{hours} hrs {mins} mins**")
 
     if lines:
         lines.append("\u2500" * 30)
@@ -140,10 +145,10 @@ def build_detail_embed(
     embed.add_field(name="Kill Streak", value=streak_val)
 
     embed.add_field(name="\u200b\nTeam Contribution", value="\u200b", inline=False)
+    embed.add_field(name="Damage", value=f"{fmt_gold(s.hero_damage)}\n{fmt_pct(c.damage)}")
+    embed.add_field(name="Dmg Taken", value=f"{fmt_gold(s.damage_taken)}\n{fmt_pct(c.damage_taken)}")
+    embed.add_field(name="Tower Dmg", value=f"{fmt_gold(s.tower_damage)}\n{fmt_pct(c.tower_damage)}")
     embed.add_field(name="Participation", value=fmt_pct(c.fight))
-    embed.add_field(name="Damage", value=fmt_pct(c.damage))
-    embed.add_field(name="Tower Dmg", value=fmt_pct(c.tower_damage))
-    embed.add_field(name="Dmg Taken", value=fmt_pct(c.damage_taken))
     embed.add_field(name="Vision", value=fmt_pct(c.vision))
     embed.add_field(name="Stuns", value=fmt_pct(c.stuns))
     embed.add_field(name="Lane Eff", value=fmt_pct(c.lane_eff))

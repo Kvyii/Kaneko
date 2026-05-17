@@ -35,16 +35,16 @@ def classify_match(
     deficit_pct = abs(max_deficit) / swing if swing > 0 else 0
 
     if match.won:
-        if max_deficit < -5000 and deficit_pct >= 0.5:
+        if max_deficit < -15000 or (max_deficit < -8000 and deficit_pct >= 0.35):
             match_type = "Comeback"
-        elif max_lead > 8000 and lead_pct >= 0.5:
+        elif max_lead > 15000 or (max_lead > 10000 and lead_pct >= 0.7):
             match_type = "Stomp"
         else:
             match_type = "Even"
     else:
-        if max_lead > 5000 and lead_pct >= 0.5:
+        if max_lead > 15000 or (max_lead > 8000 and lead_pct >= 0.35):
             match_type = "Throw"
-        elif max_deficit < -8000 and deficit_pct >= 0.5:
+        elif max_deficit < -15000 or (max_deficit < -10000 and deficit_pct >= 0.7):
             match_type = "Stomped"
         else:
             match_type = "Even"
@@ -130,7 +130,9 @@ def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerSt
         lh_at_10 = player.lh_t[10]
 
     return PlayerStats(
+        hero_damage=player.hero_damage,
         tower_damage=player.tower_damage,
+        damage_taken=player.total_damage_taken,
         hero_healing=player.hero_healing,
         gpm=player.gold_per_min,
         xpm=player.xp_per_min,
