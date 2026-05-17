@@ -1,56 +1,72 @@
-# DotA Match Tracker
+# Kaneko
 
-Fetches and displays your recent Dota 2 matches using the OpenDota API.
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Setup (Windows, fresh install)
+A CLI tool that fetches your recent Dota 2 matches from the [OpenDota API](https://docs.opendota.com/) and classifies them with performance metrics.
 
-### 1. Install uv
+## Features
 
-Open PowerShell and run:
+- **Match classification** — categorises each game as Stomp, Stomped, Comeback, Throw, or Even based on gold advantage curves
+- **Contribution metrics** — fight participation, damage share, vision, stuns, and lane efficiency as team percentages
+- **Auto-parse requests** — automatically queues unparsed replays for parsing via OpenDota
+- **Turbo MMR** — displays your computed turbo MMR from OpenDota
 
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+## Output
+
+```
+Player: Kv
+Turbo MMR: 3856
+
+┌───┬────────┬──────────────────┬─────────┬──────────┬───────────────────┬─────────┬──────────┬─────────┐
+│ # │ Result │ Hero             │ K/D/A   │ Duration │ Date              │ Type    │ Max Lead │ Max Def │
+├───┼────────┼──────────────────┼─────────┼──────────┼───────────────────┼─────────┼──────────┼─────────┤
+│ 1 │  Win   │ Pudge (Off)      │ 12/4/15 │ 35:22    │ 2:14pm 17 May ... │ Stomp   │   18.2k  │  -1.3k  │
+│ 2 │  Loss  │ Lion (Mid)       │ 19/10/13│ 44:22    │ 1:30pm 17 May ... │ Stomped │   10.1k  │ -40.2k  │
+└───┴────────┴──────────────────┴─────────┴──────────┴───────────────────┴─────────┴──────────┴─────────┘
 ```
 
-Close and reopen your terminal after installing so `uv` is on your PATH.
+## Setup
 
-### 2. Clone the repo
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12+.
 
-```powershell
-git clone <repo-url>
-cd DotA
-```
-
-### 3. Install dependencies
-
-```powershell
+```sh
+git clone https://github.com/Kvyii/Kaneko.git
+cd Kaneko
 uv sync
 ```
 
-This will automatically download the correct Python version and install all dependencies into a `.venv`.
-
-### 4. Configure your player ID
-
-Edit `config.json` and set your OpenDota player ID (the number from your profile URL, e.g. `https://www.opendota.com/players/012345678`):
+Create a `config.json` with your [OpenDota player ID](https://www.opendota.com/):
 
 ```json
 {
-    "player_id": 012345678
+    "player_id": 123456789,
+    "turbo_only": true
 }
 ```
 
-### 5. Run
+Run:
 
-```powershell
-uv run main.py
+```sh
+uv run dota
+```
+
+## Project Structure
+
+```
+src/dota/
+├── api/client.py          # OpenDota API client
+├── models/match.py        # Pydantic data models
+├── analysis/classifier.py # Match classification & contribution logic
+├── display/table.py       # Rich terminal table rendering
+├── config.py              # Configuration loading
+└── __main__.py            # Entrypoint
 ```
 
 ## Data
 
-The `data/` folder contains static JSON files from [odota/dotaconstants](https://github.com/odota/dotaconstants) (MIT license). These provide hero names, game mode labels, and other Dota 2 constants.
+The `data/` folder contains static JSON from [odota/dotaconstants](https://github.com/odota/dotaconstants) (MIT license) for hero names and game constants.
 
-## VSCode setup
+## License
 
-1. Install the [Python extension](https://marketplace.visualstudio.com/items?itemName=ms-python.python)
-2. Open the project folder in VSCode
-3. VSCode should auto-detect the `.venv` — if not, open the command palette (`Ctrl+Shift+P`) and select **Python: Select Interpreter**, then choose the `.venv` in the project folder
+[MIT](LICENSE)

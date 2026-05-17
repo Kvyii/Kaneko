@@ -2,6 +2,7 @@ import asyncio
 
 import httpx
 
+from dota.cache import MatchCache
 from dota.models.match import MatchDetail, RecentMatch
 
 BASE_URL = "https://api.opendota.com/api"
@@ -27,8 +28,28 @@ class OpenDotaClient:
         resp.raise_for_status()
         return [RecentMatch(**m) for m in resp.json()]
 
-    def fetch_match_details(self, match_ids: list[int]) -> dict[int, MatchDetail]:
-        return asyncio.run(self._fetch_match_details_async(match_ids))
+    def fetch_match_details(self, match_ids: list[int], cache: MatchCache | None = None) -> dict[int, MatchDetail]:
+        results = {}
+        to_fetch = []
+
+        if cache:
+            for mid in match_ids:
+                cached = cache.get(mid)
+                if cached:
+                    results[mid] = cached
+                else:
+                    to_fetch.append(mid)
+        else:
+            to_fetch = match_ids
+
+        if to_fetch:
+            fetched = asyncio.run(self._fetch_match_details_async(to_fetch))
+            for mid, detail in fetched.items():
+                if cache:
+                    cache.put(mid, detail)
+                results[mid] = detail
+
+        return results
 
     async def _fetch_match_details_async(self, match_ids: list[int]) -> dict[int, MatchDetail]:
         results = {}

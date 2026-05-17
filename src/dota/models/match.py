@@ -27,10 +27,18 @@ class PlayerDetail(BaseModel):
     kills: int = 0
     assists: int = 0
     hero_damage: int = 0
+    tower_damage: int = 0
+    hero_healing: int = 0
     obs_placed: int = 0
     sen_placed: int = 0
     stuns: float = 0
     lane_efficiency: float | None = None
+    gold_per_min: int = 0
+    xp_per_min: int = 0
+    last_hits: int = 0
+    denies: int = 0
+    lh_t: list[int] | None = None
+    life_state_dead: int = 0
 
 
 class MatchDetail(BaseModel):
@@ -47,11 +55,23 @@ class Contribution(BaseModel):
     lane_eff: float | None = None
 
 
+class PlayerStats(BaseModel):
+    tower_damage: int = 0
+    hero_healing: int = 0
+    gpm: int = 0
+    xpm: int = 0
+    last_hits: int = 0
+    denies: int = 0
+    lh_at_10: int | None = None
+    time_dead: int = 0
+
+
 class ClassifiedMatch(BaseModel):
     match: RecentMatch
     match_type: str
     peak_lead: int | None = None
     peak_deficit: int | None = None
     contribution: Contribution = Contribution()
+    stats: PlayerStats = PlayerStats()
     lane: str = "?"
     hero_name: str = "Unknown"

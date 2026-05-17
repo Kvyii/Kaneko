@@ -3,6 +3,7 @@ from dota.models.match import (
     Contribution,
     MatchDetail,
     PlayerDetail,
+    PlayerStats,
     RecentMatch,
 )
 
@@ -108,6 +109,28 @@ def get_lane(match: RecentMatch, detail: MatchDetail | None) -> str:
     return lane_map.get(player.lane, "?")
 
 
+def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerStats:
+    if detail is None:
+        return PlayerStats()
+    player = find_player(detail, match.player_slot)
+    if player is None:
+        return PlayerStats()
+    lh_at_10 = None
+    if player.lh_t and len(player.lh_t) > 10:
+        lh_at_10 = player.lh_t[10]
+
+    return PlayerStats(
+        tower_damage=player.tower_damage,
+        hero_healing=player.hero_healing,
+        gpm=player.gold_per_min,
+        xpm=player.xp_per_min,
+        last_hits=player.last_hits,
+        denies=player.denies,
+        lh_at_10=lh_at_10,
+        time_dead=player.life_state_dead,
+    )
+
+
 def build_classified_matches(
     matches: list[RecentMatch],
     details: dict[int, MatchDetail],
@@ -121,6 +144,8 @@ def build_classified_matches(
         lane = get_lane(match, detail)
         hero_name = heroes.get(str(match.hero_id), f"ID:{match.hero_id}")
 
+        stats = get_player_stats(match, detail)
+
         results.append(
             ClassifiedMatch(
                 match=match,
@@ -128,6 +153,7 @@ def build_classified_matches(
                 peak_lead=peak_lead,
                 peak_deficit=peak_deficit,
                 contribution=contribution,
+                stats=stats,
                 lane=lane,
                 hero_name=hero_name,
             )
