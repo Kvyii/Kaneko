@@ -17,7 +17,7 @@ from dota.llm.prepare import enrich_match_data
 from dota.prompts.match_analysis import build_system_prompt
 
 from dota.bot.players import PlayerRegistry
-from dota.bot.embeds import build_summary_embed, build_detail_embed, build_analysis_embeds
+from dota.bot.embeds import build_summary_embeds, build_detail_embed, build_analysis_embeds
 
 log = logging.getLogger("dota.bot")
 
@@ -25,9 +25,12 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 NUMBER_EMOJIS = ["1\ufe0f\u20e3", "2\ufe0f\u20e3", "3\ufe0f\u20e3", "4\ufe0f\u20e3", "5\ufe0f\u20e3"]
 BRAIN_EMOJI = "\U0001f9e0"
-REACTION_TIMEOUT = 120.0  # seconds
+REACTION_TIMEOUT = 15.0  # seconds
 AI_COOLDOWN = 300.0  # 5 minutes
 OWNER_DISCORD_ID = 227439391147032576
+
+
+STEAM_CDN = "https://cdn.cloudflare.steamstatic.com"
 
 
 def _load_heroes() -> dict[str, str]:
@@ -36,6 +39,16 @@ def _load_heroes() -> dict[str, str]:
     return {
         str(hero_id): data["localized_name"]
         for hero_id, data in heroes.items()
+    }
+
+
+def _load_hero_icons() -> dict[str, str]:
+    with open(DATA_DIR / "heroes.json") as f:
+        heroes = json.load(f)
+    return {
+        str(hero_id): f"{STEAM_CDN}{data['img']}"
+        for hero_id, data in heroes.items()
+        if data.get("img")
     }
 
 
@@ -50,6 +63,7 @@ class DotaBot(discord.Client):
         self.cache = MatchCache()
         self.client = OpenDotaClient()
         self.heroes = _load_heroes()
+        self.hero_icons = _load_hero_icons()
 
         # Cooldown: discord_user_id -> last /info timestamp
         self._cooldowns: dict[int, float] = {}
@@ -157,9 +171,19 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         await interaction.followup.send("Failed to reach OpenDota API.")
         return
 
-    name = player.get("profile", {}).get("personaname", "Unknown")
+    profile = player.get("profile", {})
+    name = profile.get("personaname", "Unknown")
+    avatar = profile.get("avatarmedium")
     turbo_mmr = player.get("computed_mmr_turbo")
-    log.info("Player profile fetched — name=%s, turbo_mmr=%s", name, turbo_mmr)
+    log.info("Player profile fetched — name=%s, turbo_mmr=%s, avatar=%s", name, turbo_mmr, bool(avatar))
+
+    # Fetch weekly win/loss
+    wl = {"win": 0, "lose": 0}
+    try:
+        wl = await bot.client.fetch_wl_async(player_id, date=7)
+        log.info("Weekly W/L fetched — win=%d, lose=%d", wl.get("win", 0), wl.get("lose", 0))
+    except Exception:
+        log.warning("Failed to fetch weekly W/L — player_id=%d", player_id, exc_info=True)
 
     # Fetch recent matches
     log.info("Fetching recent matches — player_id=%d, limit=5", player_id)
@@ -199,9 +223,13 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     classified = build_classified_matches(matches, details, bot.heroes)
     log.info("Classified %d matches", len(classified))
 
-    # Send summary embed
-    embed = build_summary_embed(name, turbo_mmr, classified)
-    message = await interaction.followup.send(embed=embed, wait=True)
+    # Send summary embeds
+    summary_embeds = build_summary_embeds(
+        name, turbo_mmr, classified,
+        hero_icons=bot.hero_icons, avatar_url=avatar,
+        weekly_wl=wl,
+    )
+    message = await interaction.followup.send(embeds=summary_embeds, wait=True)
     log.info("Summary embed sent — message_id=%s", message.id)
 
     # Add number reactions for each match
@@ -221,7 +249,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     try:
         reaction, _ = await bot.wait_for("reaction_add", timeout=REACTION_TIMEOUT, check=check_number)
     except TimeoutError:
-        log.info("Match selection timed out — %s (%s)", interaction.user, user_id)
+        log.info("Match selection timed out after %.0fs — %s (%s)", REACTION_TIMEOUT, interaction.user, user_id)
         return
 
     idx = NUMBER_EMOJIS.index(str(reaction.emoji))
@@ -230,7 +258,8 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
              interaction.user, user_id, idx + 1, cm.match.match_id, cm.hero_name)
 
     # Send detail embed
-    detail_embed = build_detail_embed(cm)
+    hero_icon = bot.hero_icons.get(str(cm.match.hero_id))
+    detail_embed = build_detail_embed(cm, hero_icon_url=hero_icon)
     detail_msg = await interaction.channel.send(embed=detail_embed)
     log.info("Detail embed sent — message_id=%s", detail_msg.id)
     await detail_msg.add_reaction(BRAIN_EMOJI)
@@ -248,7 +277,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     try:
         await bot.wait_for("reaction_add", timeout=REACTION_TIMEOUT, check=check_brain)
     except TimeoutError:
-        log.info("AI analysis reaction timed out — %s (%s)", interaction.user, user_id)
+        log.info("AI analysis reaction timed out after %.0fs — %s (%s)", REACTION_TIMEOUT, interaction.user, user_id)
         return
 
     log.info("AI analysis requested — %s (%s), match_id=%d", interaction.user, user_id, cm.match.match_id)
@@ -325,14 +354,28 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
 def run_bot() -> None:
     load_dotenv()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    import colorlog
+
+    handler = colorlog.StreamHandler()
+    handler.setFormatter(colorlog.ColoredFormatter(
+        fmt="%(asctime)s %(log_color)s%(levelname)-8s%(reset)s %(cyan)s[%(name)s]%(reset)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-    )
+        log_colors={
+            "DEBUG": "white",
+            "INFO": "green",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold_red",
+        },
+    ))
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.handlers.clear()
+    root.addHandler(handler)
 
     token = os.environ.get("DISCORD_TOKEN", "")
     if not token:
         log.error("DISCORD_TOKEN is not set. Add it to your .env file.")
         return
-    bot.run(token)
+    bot.run(token, log_handler=None)

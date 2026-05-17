@@ -30,20 +30,21 @@ def classify_match(
     max_lead = max(team_adv)
     max_deficit = min(team_adv)
 
-    lead_ratio = max_lead / abs(max_deficit) if max_deficit < 0 else float("inf")
-    deficit_ratio = abs(max_deficit) / max_lead if max_lead > 0 else float("inf")
+    swing = max_lead + abs(max_deficit) if max_deficit < 0 else max_lead
+    lead_pct = max_lead / swing if swing > 0 else 0
+    deficit_pct = abs(max_deficit) / swing if swing > 0 else 0
 
     if match.won:
-        if max_deficit < -5000 and deficit_ratio > 0.5:
+        if max_deficit < -5000 and deficit_pct >= 0.5:
             match_type = "Comeback"
-        elif max_lead > 8000 and lead_ratio > 1.5:
+        elif max_lead > 8000 and lead_pct >= 0.5:
             match_type = "Stomp"
         else:
             match_type = "Even"
     else:
-        if max_lead > 5000 and lead_ratio > 0.5:
+        if max_lead > 5000 and lead_pct >= 0.5:
             match_type = "Throw"
-        elif max_deficit < -8000 and deficit_ratio > 1.5:
+        elif max_deficit < -8000 and deficit_pct >= 0.5:
             match_type = "Stomped"
         else:
             match_type = "Even"

@@ -39,6 +39,8 @@ Keep in mind the following when analyzing the match:
 
 Response guidelines:
 - Respond using markdown formatting.
+- Use bullet points and subheadings to structure your analysis clearly.
+- Keep each section to 5 core reasons or insights, prioritising the most impactful ones.
 - You MUST structure your response using exactly these three section headers (with the exact heading text):
 
 # Match Summary

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 
@@ -15,13 +15,14 @@ def _format_date_discord(timestamp: int) -> str:
     ampm = "AM" if dt.hour < 12 else "PM"
     return f"{dt.strftime('%A')} {dt.day} {dt.strftime('%b')} - {hour}:{dt.minute:02d}{ampm}"
 
+
 TYPE_EMOJI = {
-    "Stomp": "\U0001f7e2",    # green circle
-    "Stomped": "\U0001f534",   # red circle
-    "Comeback": "\U0001f4a0",  # diamond with dot
-    "Throw": "\U0001f7e1",     # yellow circle
-    "Even": "\u26aa",          # white circle
-    "-": "\u2796",             # minus
+    "Stomp": "\U0001f7e2",  # green circle
+    "Stomped": "\U0001f534",  # red circle
+    "Comeback": "\U0001f451",  # crown
+    "Throw": "\U0001f7e0",  # orange circle
+    "Even": "\u26aa",  # white circle
+    "-": "\u2796",  # minus
 }
 
 
@@ -29,44 +30,81 @@ def _is_parsed(cm: ClassifiedMatch) -> bool:
     return cm.match_detail is not None and bool(cm.match_detail.radiant_gold_adv)
 
 
-def _match_field(i: int, cm: ClassifiedMatch) -> tuple[str, str]:
-    """Return (name, value) for a summary embed field."""
+def _match_description(cm: ClassifiedMatch) -> str:
+    """Return the text body for a summary match embed."""
     m = cm.match
     s = cm.stats
-    result = "\u2705 Win" if m.won else "\u274c Loss"
+    result = "Win" if m.won else "Loss"
     type_icon = TYPE_EMOJI.get(cm.match_type, "")
+    display_type = "Threw" if cm.match_type == "Throw" else cm.match_type
 
-    name = f"{i}\ufe0f\u20e3  {cm.hero_name} ({cm.lane})"
-    value = (
-        f"{result}  |  {m.kills}/{m.deaths}/{m.assists}  |  {format_duration(m.duration)}\n"
-        f"{type_icon} {cm.match_type}\n"
+    return (
         f"{_format_date_discord(m.start_time)}\n"
-        f"GPM: **{s.gpm}**  |  XPM: **{s.xpm}**  |  LH/DN: **{s.last_hits}/{s.denies}**\n"
-        f"Lead: **{fmt_gold(cm.peak_lead)}**  |  Deficit: **{fmt_gold(cm.peak_deficit)}**"
+        f"{result} - {display_type} {type_icon}\n"
+        f"KDA: {m.kills}/{m.deaths}/{m.assists}\n"
+        f"Length: {format_duration(m.duration)}\n"
+        f"LH/DN: **{s.last_hits}/{s.denies}**\n"
+        f"GPM: **{s.gpm}**  |  XPM: **{s.xpm}**\n"
+        f"Lead: **{fmt_gold(cm.peak_lead)}**  |  Deficit: **{fmt_gold(cm.peak_deficit)}**\n"
+        + "\u2500" * 30
     )
-    return name, value
 
 
-def build_summary_embed(
+def build_summary_embeds(
     player_name: str,
     turbo_mmr: float | None,
     matches: list[ClassifiedMatch],
-) -> discord.Embed:
+    hero_icons: dict[str, str] | None = None,
+    avatar_url: str | None = None,
+    weekly_wl: dict | None = None,
+) -> list[discord.Embed]:
     title = f"{player_name}"
     if turbo_mmr is not None:
         title += f"  |  Turbo MMR: {turbo_mmr:.0f}"
 
-    embed = discord.Embed(title=title, color=discord.Color.blue())
+    lines = []
+    if weekly_wl:
+        wins = weekly_wl.get("win", 0)
+        losses = weekly_wl.get("lose", 0)
+        total = wins + losses
+        if total > 0:
+            win_pct = wins / total * 100
+            loss_pct = losses / total * 100
+            lines.append(f"Games this week: **{total}**")
+            lines.append(f"Wins: **{wins}** ({win_pct:.0f}%)  |  Losses: **{losses}** ({loss_pct:.0f}%)")
+
+    if lines:
+        lines.append("\u2500" * 30)
+
+    header = discord.Embed(
+        title=title,
+        description="\n".join(lines) if lines else None,
+        color=discord.Color.blue(),
+    )
+    if avatar_url:
+        header.set_thumbnail(url=avatar_url)
+    embeds = [header]
 
     for i, cm in enumerate(matches, 1):
-        name, value = _match_field(i, cm)
-        embed.add_field(name=name, value=value, inline=False)
+        color = discord.Color.green() if cm.match.won else discord.Color.red()
+        embed = discord.Embed(
+            title=f"{i}\ufe0f\u20e3  {cm.hero_name} ({cm.lane})",
+            description=_match_description(cm),
+            color=color,
+        )
+        if hero_icons:
+            icon_url = hero_icons.get(str(cm.match.hero_id))
+            if icon_url:
+                embed.set_thumbnail(url=icon_url)
+        embeds.append(embed)
 
-    embed.set_footer(text="React with a number to see match details")
-    return embed
+    embeds[-1].set_footer(text="React with a number to see match details")
+    return embeds
 
 
-def build_detail_embed(cm: ClassifiedMatch) -> discord.Embed:
+def build_detail_embed(
+    cm: ClassifiedMatch, hero_icon_url: str | None = None
+) -> discord.Embed:
     m = cm.match
     s = cm.stats
     c = cm.contribution
@@ -79,13 +117,18 @@ def build_detail_embed(cm: ClassifiedMatch) -> discord.Embed:
         title=f"{cm.hero_name} ({cm.lane})  \u2014  {result}",
         color=color,
     )
+    if hero_icon_url:
+        embed.set_image(url=hero_icon_url)
 
     embed.add_field(name="K/D/A", value=f"**{m.kills}/{m.deaths}/{m.assists}**")
     embed.add_field(name="GPM / XPM", value=f"{s.gpm} / {s.xpm}")
     embed.add_field(name="LH/DN", value=f"{s.last_hits}/{s.denies}")
-    embed.add_field(name="LH@10", value=str(s.lh_at_10) if s.lh_at_10 is not None else "-")
+    embed.add_field(
+        name="LH@10", value=str(s.lh_at_10) if s.lh_at_10 is not None else "-"
+    )
     embed.add_field(name="Duration", value=format_duration(m.duration))
-    embed.add_field(name="Type", value=f"{type_icon} {cm.match_type}")
+    display_type = "Threw" if cm.match_type == "Throw" else cm.match_type
+    embed.add_field(name="Type", value=f"{type_icon} {display_type}")
     embed.add_field(name="Max Lead", value=fmt_gold(cm.peak_lead))
     embed.add_field(name="Max Deficit", value=fmt_gold(cm.peak_deficit))
     embed.add_field(name="Tower Dmg", value=fmt_gold(s.tower_damage))
@@ -106,7 +149,7 @@ def build_detail_embed(cm: ClassifiedMatch) -> discord.Embed:
 
 def _truncate(text: str, limit: int = 4096) -> str:
     if len(text) > limit:
-        return text[:limit - 3] + "..."
+        return text[: limit - 3] + "..."
     return text
 
 

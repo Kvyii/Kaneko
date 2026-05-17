@@ -67,6 +67,21 @@ class OpenDotaClient:
 
         return results
 
+    async def fetch_wl_async(self, player_id: int, date: int | None = None) -> dict:
+        """Fetch win/loss counts. date = number of days to look back."""
+        params = {"significant": 0}  # include all modes (turbo etc.)
+        if date is not None:
+            params["date"] = date
+        log.info("GET %s/players/%d/wl date=%s significant=0", BASE_URL, player_id, date)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/players/{player_id}/wl",
+                params=params,
+            )
+            log.info("GET /players/%d/wl — %d", player_id, resp.status_code)
+            resp.raise_for_status()
+            return resp.json()
+
     async def request_parse_async(self, match_ids: list[int]) -> list[int]:
         log.info("Requesting parse for %d matches — %s", len(match_ids), match_ids)
         result = await self._request_parse_async(match_ids)
