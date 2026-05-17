@@ -214,8 +214,14 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     ]
     if unparsed:
         log.info("Requesting parse for unparsed matches — %s", unparsed)
+        ids_list = "\n".join(f"- `{mid}`" for mid in unparsed)
         try:
             await bot.client.request_parse_async(unparsed)
+            await interaction.channel.send(
+                f"Discovered unparsed matches:\n{ids_list}\n\n"
+                f"Requesting the most recent {len(unparsed)} match(es) for parsing. "
+                f"Please wait up to 5 minutes."
+            )
         except Exception:
             log.warning("Parse request failed for %s", unparsed, exc_info=True)
 
@@ -300,12 +306,14 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
 
     # Run AI analysis
     is_parsed = cm.match_detail is not None and bool(cm.match_detail.radiant_gold_adv)
-    warning = ""
     if not is_parsed:
-        warning = "\n\u26a0\ufe0f **Note:** This game is not yet parsed by OpenDota."
-        log.info("Match %d is not parsed — including warning", cm.match.match_id)
+        log.info("AI analysis rejected — match %d is not parsed", cm.match.match_id)
+        await interaction.channel.send(
+            "Sorry, this match has not been parsed by OpenDota yet."
+        )
+        return
     await interaction.channel.send(
-        f"\u23f3 Analyzing, please wait up to 60 seconds...{warning}"
+        "\u23f3 Analyzing, please wait up to 60 seconds..."
     )
 
     try:
