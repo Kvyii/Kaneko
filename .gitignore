@@ -20,5 +20,5 @@ wheels/
 
 # Environment
 .env
-players.json
+config/players.json
 .claude/settings.local.json

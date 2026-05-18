@@ -45,6 +45,7 @@ class UsageTracker:
                 "llm_hour": "",
                 "llm_count": 0,
                 "api_calls": 0,
+                "llm_calls": 0,
                 "commands": {},
             }
         return self._data[key]
@@ -87,6 +88,7 @@ class UsageTracker:
             user["llm_hour"] = hour
             user["llm_count"] = 0
         user["llm_count"] += 1
+        user["llm_calls"] = user.get("llm_calls", 0) + 1
         self._save()
         log.debug("Recorded LLM call for %d — count=%d in hour %s", discord_id, user["llm_count"], hour)
 
@@ -109,6 +111,7 @@ class UsageTracker:
         return {
             "commands": dict(user.get("commands", {})),
             "api_calls": user.get("api_calls", 0),
+            "llm_calls": user.get("llm_calls", 0),
             "info_this_hour": info_this_hour,
             "llm_this_hour": llm_this_hour,
             "seconds_until_refresh": _seconds_until_next_hour(),

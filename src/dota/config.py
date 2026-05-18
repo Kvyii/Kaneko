@@ -11,7 +11,7 @@ class Config(BaseModel):
 
 def load_config(path: Path | None = None) -> Config:
     if path is None:
-        path = Path("config.json")
+        path = Path("config/config.json")
     with open(path) as f:
         data = json.load(f)
     return Config(**data)
