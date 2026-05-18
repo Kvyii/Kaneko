@@ -1,7 +1,7 @@
 # Kaneko
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 Kaneko is a Discord bot that analyzes your Dota 2 matches. It pulls data from the [OpenDota API](https://docs.opendota.com/), classifies your games, breaks down your performance, and uses an LLM to give you a detailed analysis of any match — all from within Discord.
 
@@ -74,4 +74,4 @@ The `data/` folder contains static JSON from [odota/dotaconstants](https://githu
 
 ## License
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE)
