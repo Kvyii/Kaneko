@@ -4,7 +4,7 @@ from pathlib import Path
 
 log = logging.getLogger("dota.bot.players")
 
-PLAYERS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "players.json"
+PLAYERS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "config" / "players.json"
 
 DEFAULT_MAX_INFO_PER_HOUR = 5
 DEFAULT_MAX_LLM_PER_HOUR = 3
@@ -56,6 +56,12 @@ class PlayerRegistry:
             entry.get("max_info_per_hour", DEFAULT_MAX_INFO_PER_HOUR),
             entry.get("max_llm_per_hour", DEFAULT_MAX_LLM_PER_HOUR),
         )
+
+    def is_banned(self, discord_id: int) -> bool:
+        entry = self._data.get(str(discord_id))
+        if entry is None:
+            return False
+        return entry.get("banned", False)
 
     def register(self, discord_id: int, player_id: int) -> None:
         self._data[str(discord_id)] = {

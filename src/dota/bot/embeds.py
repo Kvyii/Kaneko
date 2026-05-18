@@ -60,6 +60,8 @@ def build_summary_embeds(
     avatar_url: str | None = None,
     weekly_wl: dict | None = None,
     weekly_seconds: int = 0,
+    page: int = 0,
+    total_pages: int = 1,
 ) -> list[discord.Embed]:
     title = f"{player_name}"
     if turbo_mmr is not None:
@@ -105,7 +107,10 @@ def build_summary_embeds(
                 embed.set_thumbnail(url=icon_url)
         embeds.append(embed)
 
-    embeds[-1].set_footer(text="React with a number to see match details")
+    footer = "React with a number to see match details"
+    if total_pages > 1:
+        footer = f"Page {page + 1}/{total_pages} — {footer}"
+    embeds[-1].set_footer(text=footer)
     return embeds
 
 

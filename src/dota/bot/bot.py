@@ -9,24 +9,38 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
-from dota.api.client import OpenDotaClient
 from dota.analysis.classifier import build_classified_matches
+from dota.api.client import OpenDotaClient
+from dota.bot.embeds import (
+    build_analysis_embeds,
+    build_detail_embed,
+    build_summary_embeds,
+    format_date_discord,
+)
+from dota.bot.players import PlayerRegistry
+from dota.bot.usage import UsageTracker
 from dota.cache import MatchCache
 from dota.llm.client import analyze_match
 from dota.llm.prepare import enrich_match_data
 from dota.prompts.match_analysis import build_system_prompt
 
-from dota.bot.players import PlayerRegistry
-from dota.bot.embeds import build_summary_embeds, build_detail_embed, build_analysis_embeds, format_date_discord
-from dota.bot.usage import UsageTracker
-
 log = logging.getLogger("dota.bot")
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
-NUMBER_EMOJIS = ["1\ufe0f\u20e3", "2\ufe0f\u20e3", "3\ufe0f\u20e3", "4\ufe0f\u20e3", "5\ufe0f\u20e3"]
+NUMBER_EMOJIS = [
+    "1\ufe0f\u20e3",
+    "2\ufe0f\u20e3",
+    "3\ufe0f\u20e3",
+    "4\ufe0f\u20e3",
+    "5\ufe0f\u20e3",
+]
 BRAIN_EMOJI = "\U0001f9e0"
+LEFT_ARROW = "\u25c0"
+RIGHT_ARROW = "\u25b6"
 REACTION_TIMEOUT = 25.0  # seconds
+PAGE_SIZE = 5
+MAX_MATCHES = 20
 OWNER_DISCORD_ID = 227439391147032576
 
 
@@ -36,10 +50,7 @@ STEAM_CDN = "https://cdn.cloudflare.steamstatic.com"
 def _load_heroes() -> dict[str, str]:
     with open(DATA_DIR / "heroes.json") as f:
         heroes = json.load(f)
-    return {
-        str(hero_id): data["localized_name"]
-        for hero_id, data in heroes.items()
-    }
+    return {str(hero_id): data["localized_name"] for hero_id, data in heroes.items()}
 
 
 def _load_hero_icons() -> dict[str, str]:
@@ -68,7 +79,9 @@ class DotaBot(discord.Client):
         self.usage = UsageTracker()
 
         # Active session lock: only one /info at a time
-        self._active_session: int | None = None  # discord user id of active session owner
+        self._active_session: int | None = (
+            None  # discord user id of active session owner
+        )
 
     async def setup_hook(self) -> None:
         self.tree.add_command(_register)
@@ -97,7 +110,17 @@ bot = DotaBot()
 @app_commands.command(name="register", description="Link your OpenDota player ID")
 @app_commands.describe(player_id="Your OpenDota numeric player ID")
 async def _register(interaction: discord.Interaction, player_id: int) -> None:
-    log.info("/register by %s (%s) — player_id=%d", interaction.user, interaction.user.id, player_id)
+    log.info(
+        "/register by %s (%s) — player_id=%d",
+        interaction.user,
+        interaction.user.id,
+        player_id,
+    )
+
+    if bot.registry.is_banned(interaction.user.id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
     await interaction.response.defer()
 
     try:
@@ -110,7 +133,13 @@ async def _register(interaction: discord.Interaction, player_id: int) -> None:
     name = player.get("profile", {}).get("personaname", "Unknown")
     bot.registry.register(interaction.user.id, player_id)
     bot.usage.record_command(interaction.user.id, "register")
-    log.info("/register success — %s (%s) linked to %s (player_id=%d)", interaction.user, interaction.user.id, name, player_id)
+    log.info(
+        "/register success — %s (%s) linked to %s (player_id=%d)",
+        interaction.user,
+        interaction.user.id,
+        name,
+        player_id,
+    )
 
     embed = discord.Embed(
         title="Registered",
@@ -124,6 +153,11 @@ async def _register(interaction: discord.Interaction, player_id: int) -> None:
 async def _usage(interaction: discord.Interaction) -> None:
     user_id = interaction.user.id
     log.info("/usage by %s (%s)", interaction.user, user_id)
+
+    if bot.registry.is_banned(user_id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
     bot.usage.record_command(user_id, "usage")
 
     stats = bot.usage.get_usage(user_id)
@@ -153,12 +187,13 @@ async def _usage(interaction: discord.Interaction) -> None:
         inline=False,
     )
     embed.add_field(
-        name="API Calls (lifetime)",
-        value=f"**{stats['api_calls']}**",
-        inline=True,
+        name="Total Usage",
+        value=(
+            f"API Calls: **{stats['api_calls']}**\n"
+            f"AI analysis: **{stats['llm_calls']}**"
+        ),
+        inline=False,
     )
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
     embed.add_field(
         name="Remaining This Hour",
         value=(
@@ -176,6 +211,11 @@ async def _info(interaction: discord.Interaction) -> None:
     user_id = interaction.user.id
     log.info("/info by %s (%s)", interaction.user, user_id)
 
+    # Guard: banned
+    if bot.registry.is_banned(user_id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
     # Guard: registration
     player_id = bot.registry.get(user_id)
     if player_id is None:
@@ -188,7 +228,9 @@ async def _info(interaction: discord.Interaction) -> None:
 
     # Guard: active session
     if bot._active_session is not None:
-        log.info("/info rejected — session already active (owner=%s)", bot._active_session)
+        log.info(
+            "/info rejected — session already active (owner=%s)", bot._active_session
+        )
         await interaction.response.send_message(
             "Another session is active. Please wait for it to finish.",
             ephemeral=True,
@@ -202,7 +244,13 @@ async def _info(interaction: discord.Interaction) -> None:
         if not allowed:
             mins = secs // 60
             secs = secs % 60
-            log.info("/info rejected — %s (%s) rate limited (%dm %ds remaining)", interaction.user, user_id, mins, secs)
+            log.info(
+                "/info rejected — %s (%s) rate limited (%dm %ds remaining)",
+                interaction.user,
+                user_id,
+                mins,
+                secs,
+            )
             await interaction.response.send_message(
                 f"You have used your maximum allowed usage. Refresh in {mins} minutes {secs} seconds.",
                 ephemeral=True,
@@ -211,7 +259,12 @@ async def _info(interaction: discord.Interaction) -> None:
 
     bot._active_session = user_id
     bot.usage.record_info(user_id)
-    log.info("/info session started — %s (%s), player_id=%d", interaction.user, user_id, player_id)
+    log.info(
+        "/info session started — %s (%s), player_id=%d",
+        interaction.user,
+        user_id,
+        player_id,
+    )
     await interaction.response.defer()
 
     try:
@@ -219,6 +272,54 @@ async def _info(interaction: discord.Interaction) -> None:
     finally:
         bot._active_session = None
         log.info("/info session ended — %s (%s)", interaction.user, user_id)
+
+
+async def _fetch_page_details(
+    page_matches: list,
+    details: dict,
+    api_calls: int,
+    interaction: discord.Interaction,
+) -> int:
+    """Fetch match details for a page, skipping already-fetched ones. Returns new api_calls."""
+    page_ids = [m.match_id for m in page_matches]
+    missing_ids = [mid for mid in page_ids if mid not in details]
+    if not missing_ids:
+        return api_calls
+
+    log.info("Fetching match details — match_ids=%s", missing_ids)
+    cached_before = sum(1 for mid in missing_ids if bot.cache.get(mid) is not None)
+    new_details = await bot.client.fetch_match_details_async(missing_ids, cache=bot.cache)
+    details.update(new_details)
+    api_calls += len(missing_ids) - cached_before
+    log.info("Match details fetched — %d/%d retrieved", len(new_details), len(missing_ids))
+
+    # Request parsing for unparsed matches
+    unparsed = [
+        mid
+        for mid in missing_ids
+        if mid not in details or not details[mid].radiant_gold_adv
+    ]
+    if unparsed:
+        log.info("Requesting parse for unparsed matches — %s", unparsed)
+        match_by_id = {m.match_id: m for m in page_matches}
+        ids_list = "\n".join(
+            f"- `{mid}` — {format_date_discord(match_by_id[mid].start_time)}"
+            if mid in match_by_id
+            else f"- `{mid}`"
+            for mid in unparsed
+        )
+        try:
+            await bot.client.request_parse_async(unparsed)
+            api_calls += len(unparsed) * 10
+            await interaction.channel.send(
+                f"Discovered unparsed matches:\n{ids_list}\n\n"
+                f"Requesting the most recent {len(unparsed)} match(es) for parsing. "
+                f"Please wait up to 5 minutes."
+            )
+        except Exception:
+            log.warning("Parse request failed for %s", unparsed, exc_info=True)
+
+    return api_calls
 
 
 async def _run_info_session(interaction: discord.Interaction, player_id: int) -> None:
@@ -232,7 +333,9 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         player = await bot.client.fetch_player_async(player_id)
         api_calls += 1
     except Exception:
-        log.error("Failed to fetch player profile — player_id=%d", player_id, exc_info=True)
+        log.error(
+            "Failed to fetch player profile — player_id=%d", player_id, exc_info=True
+        )
         await interaction.followup.send("Failed to reach OpenDota API.")
         return
 
@@ -240,26 +343,39 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     name = profile.get("personaname", "Unknown")
     avatar = profile.get("avatarmedium")
     turbo_mmr = player.get("computed_mmr_turbo")
-    log.info("Player profile fetched — name=%s, turbo_mmr=%s, avatar=%s", name, turbo_mmr, bool(avatar))
+    log.info(
+        "Player profile fetched — name=%s, turbo_mmr=%s, avatar=%s",
+        name,
+        turbo_mmr,
+        bool(avatar),
+    )
 
     # Fetch weekly win/loss
     wl = {"win": 0, "lose": 0}
     try:
         wl = await bot.client.fetch_wl_async(player_id, date=7)
         api_calls += 1
-        log.info("Weekly W/L fetched — win=%d, lose=%d", wl.get("win", 0), wl.get("lose", 0))
+        log.info(
+            "Weekly W/L fetched — win=%d, lose=%d", wl.get("win", 0), wl.get("lose", 0)
+        )
     except Exception:
-        log.warning("Failed to fetch weekly W/L — player_id=%d", player_id, exc_info=True)
+        log.warning(
+            "Failed to fetch weekly W/L — player_id=%d", player_id, exc_info=True
+        )
 
     # Fetch recent matches — request enough to cover the week for game time
     weekly_total = wl.get("win", 0) + wl.get("lose", 0)
-    fetch_limit = max(5, weekly_total)
+    fetch_limit = max(MAX_MATCHES, weekly_total)
     log.info("Fetching recent matches — player_id=%d, limit=%d", player_id, fetch_limit)
     try:
-        all_recent = await bot.client.fetch_recent_matches_async(player_id, limit=fetch_limit)
+        all_recent = await bot.client.fetch_recent_matches_async(
+            player_id, limit=fetch_limit
+        )
         api_calls += 1
     except Exception:
-        log.error("Failed to fetch recent matches — player_id=%d", player_id, exc_info=True)
+        log.error(
+            "Failed to fetch recent matches — player_id=%d", player_id, exc_info=True
+        )
         await interaction.followup.send("Failed to fetch matches.")
         return
 
@@ -268,88 +384,158 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         await interaction.followup.send("No recent matches found.")
         return
 
-    matches = all_recent[:5]
-    log.info("Fetched %d recent matches — displaying %d, match_ids=%s",
-             len(all_recent), len(matches), [m.match_id for m in matches])
+    matches = all_recent[:MAX_MATCHES]
+    log.info(
+        "Fetched %d recent matches — displaying %d, match_ids=%s",
+        len(all_recent),
+        len(matches),
+        [m.match_id for m in matches],
+    )
 
     # Calculate weekly game time from the fetched matches
-    weekly_seconds = 0
     cutoff = int(time.time()) - 7 * 86400
     weekly_seconds = sum(m.duration for m in all_recent if m.start_time >= cutoff)
     log.info("Weekly game time — total %d seconds", weekly_seconds)
 
-    # Fetch match details
-    match_ids = [m.match_id for m in matches]
-    log.info("Fetching match details — match_ids=%s", match_ids)
-    cached_before = sum(1 for mid in match_ids if bot.cache.get(mid) is not None)
-    details = await bot.client.fetch_match_details_async(match_ids, cache=bot.cache)
-    api_calls += len(match_ids) - cached_before
-    log.info("Match details fetched — %d/%d retrieved", len(details), len(match_ids))
+    # Split matches into pages
+    pages = [matches[i : i + PAGE_SIZE] for i in range(0, len(matches), PAGE_SIZE)]
+    total_pages = len(pages)
+    current_page = 0
+    details: dict = {}
 
-    # Request parsing for unparsed matches
-    unparsed = [
-        mid for mid in match_ids
-        if mid not in details or not details[mid].radiant_gold_adv
-    ]
-    if unparsed:
-        log.info("Requesting parse for unparsed matches — %s", unparsed)
-        match_by_id = {m.match_id: m for m in matches}
-        ids_list = "\n".join(
-            f"- `{mid}` — {format_date_discord(match_by_id[mid].start_time)}"
-            if mid in match_by_id else f"- `{mid}`"
-            for mid in unparsed
-        )
-        try:
-            await bot.client.request_parse_async(unparsed)
-            api_calls += len(unparsed)
-            await interaction.channel.send(
-                f"Discovered unparsed matches:\n{ids_list}\n\n"
-                f"Requesting the most recent {len(unparsed)} match(es) for parsing. "
-                f"Please wait up to 5 minutes."
-            )
-        except Exception:
-            log.warning("Parse request failed for %s", unparsed, exc_info=True)
-
-    # Record API usage
+    # Fetch details for the first page
+    api_calls = await _fetch_page_details(
+        pages[0], details, api_calls, interaction
+    )
     bot.usage.record_api_calls(user_id, api_calls)
 
-    # Classify
-    classified = build_classified_matches(matches, details, bot.heroes)
-    log.info("Classified %d matches", len(classified))
+    # Classify and send first page
+    classified_page = build_classified_matches(pages[0], details, bot.heroes)
+    log.info("Classified %d matches (page 1/%d)", len(classified_page), total_pages)
 
-    # Send summary embeds
     summary_embeds = build_summary_embeds(
-        name, turbo_mmr, classified,
-        hero_icons=bot.hero_icons, avatar_url=avatar,
-        weekly_wl=wl, weekly_seconds=weekly_seconds,
+        name,
+        turbo_mmr,
+        classified_page,
+        hero_icons=bot.hero_icons,
+        avatar_url=avatar,
+        weekly_wl=wl,
+        weekly_seconds=weekly_seconds,
+        page=0,
+        total_pages=total_pages,
     )
     message = await interaction.followup.send(embeds=summary_embeds, wait=True)
     log.info("Summary embed sent — message_id=%s", message.id)
 
-    # Add number reactions for each match
-    for i in range(len(classified)):
+    # Add reactions: arrows (if multiple pages) then numbers
+    if total_pages > 1:
+        await message.add_reaction(LEFT_ARROW)
+        await message.add_reaction(RIGHT_ARROW)
+    for i in range(len(classified_page)):
         await message.add_reaction(NUMBER_EMOJIS[i])
 
-    # Wait for number reaction from the requesting user
-    log.info("Waiting for match selection reaction from %s (%s)", interaction.user, user_id)
+    # Pagination loop — wait for arrow or number reaction
+    arrow_emojis = [LEFT_ARROW, RIGHT_ARROW]
 
-    def check_number(reaction: discord.Reaction, user: discord.User) -> bool:
-        return (
-            user.id == user_id
-            and reaction.message.id == message.id
-            and str(reaction.emoji) in NUMBER_EMOJIS[:len(classified)]
+    while True:
+        valid_emojis = NUMBER_EMOJIS[: len(classified_page)]
+        if total_pages > 1:
+            valid_emojis = valid_emojis + arrow_emojis
+
+        def check_reaction(reaction: discord.Reaction, user: discord.User) -> bool:
+            return (
+                user.id == user_id
+                and reaction.message.id == message.id
+                and str(reaction.emoji) in valid_emojis
+            )
+
+        log.info(
+            "Waiting for reaction from %s (%s) — page %d/%d",
+            interaction.user,
+            user_id,
+            current_page + 1,
+            total_pages,
         )
 
-    try:
-        reaction, _ = await bot.wait_for("reaction_add", timeout=REACTION_TIMEOUT, check=check_number)
-    except TimeoutError:
-        log.info("Match selection timed out after %.0fs — %s (%s)", REACTION_TIMEOUT, interaction.user, user_id)
-        return
+        try:
+            reaction, _ = await bot.wait_for(
+                "reaction_add", timeout=REACTION_TIMEOUT, check=check_reaction
+            )
+        except TimeoutError:
+            log.info(
+                "Match selection timed out after %.0fs — %s (%s)",
+                REACTION_TIMEOUT,
+                interaction.user,
+                user_id,
+            )
+            return
 
-    idx = NUMBER_EMOJIS.index(str(reaction.emoji))
-    cm = classified[idx]
-    log.info("Match selected — %s (%s) picked match #%d (match_id=%d, hero=%s)",
-             interaction.user, user_id, idx + 1, cm.match.match_id, cm.hero_name)
+        emoji = str(reaction.emoji)
+
+        # Handle arrow navigation
+        if emoji == LEFT_ARROW:
+            prev_page_size = len(classified_page)
+            current_page = (current_page - 1) % total_pages
+        elif emoji == RIGHT_ARROW:
+            prev_page_size = len(classified_page)
+            current_page = (current_page + 1) % total_pages
+        else:
+            # Number selected — break out to detail view
+            idx = NUMBER_EMOJIS.index(emoji)
+            cm = classified_page[idx]
+            log.info(
+                "Match selected — %s (%s) picked match #%d on page %d (match_id=%d, hero=%s)",
+                interaction.user,
+                user_id,
+                idx + 1,
+                current_page + 1,
+                cm.match.match_id,
+                cm.hero_name,
+            )
+            break
+
+        # Remove the user's arrow reaction so they can click it again
+        await reaction.remove(interaction.user)
+
+        # Navigating to a new page — fetch details lazily
+        page_api_calls = await _fetch_page_details(
+            pages[current_page], details, 0, interaction
+        )
+        if page_api_calls > 0:
+            bot.usage.record_api_calls(user_id, page_api_calls)
+
+        classified_page = build_classified_matches(
+            pages[current_page], details, bot.heroes
+        )
+        log.info(
+            "Page changed to %d/%d — classified %d matches",
+            current_page + 1,
+            total_pages,
+            len(classified_page),
+        )
+
+        summary_embeds = build_summary_embeds(
+            name,
+            turbo_mmr,
+            classified_page,
+            hero_icons=bot.hero_icons,
+            avatar_url=avatar,
+            weekly_wl=wl,
+            weekly_seconds=weekly_seconds,
+            page=current_page,
+            total_pages=total_pages,
+        )
+        await message.edit(embeds=summary_embeds)
+
+        # Only update number reactions if page size changed (e.g. last page)
+        new_page_size = len(classified_page)
+        if new_page_size != prev_page_size:
+            # Remove extra number reactions
+            for i in range(new_page_size, prev_page_size):
+                await message.clear_reaction(NUMBER_EMOJIS[i])
+            # Add missing number reactions
+            for i in range(prev_page_size, new_page_size):
+                await message.add_reaction(NUMBER_EMOJIS[i])
 
     # Send detail embed
     hero_icon = bot.hero_icons.get(str(cm.match.hero_id))
@@ -371,10 +557,20 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     try:
         await bot.wait_for("reaction_add", timeout=REACTION_TIMEOUT, check=check_brain)
     except TimeoutError:
-        log.info("AI analysis reaction timed out after %.0fs — %s (%s)", REACTION_TIMEOUT, interaction.user, user_id)
+        log.info(
+            "AI analysis reaction timed out after %.0fs — %s (%s)",
+            REACTION_TIMEOUT,
+            interaction.user,
+            user_id,
+        )
         return
 
-    log.info("AI analysis requested — %s (%s), match_id=%d", interaction.user, user_id, cm.match.match_id)
+    log.info(
+        "AI analysis requested — %s (%s), match_id=%d",
+        interaction.user,
+        user_id,
+        cm.match.match_id,
+    )
 
     # Guard: hourly LLM rate limit (owner exempt)
     if user_id != OWNER_DISCORD_ID:
@@ -383,8 +579,13 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         if not allowed:
             mins = secs // 60
             secs = secs % 60
-            log.info("AI analysis rejected — %s (%s) rate limited (%dm %ds remaining)",
-                     interaction.user, user_id, mins, secs)
+            log.info(
+                "AI analysis rejected — %s (%s) rate limited (%dm %ds remaining)",
+                interaction.user,
+                user_id,
+                mins,
+                secs,
+            )
             await interaction.channel.send(
                 f"You have used your maximum allowed usage. Refresh in {mins} minutes {secs} seconds."
             )
@@ -398,9 +599,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             "Sorry, this match has not been parsed by OpenDota yet."
         )
         return
-    await interaction.channel.send(
-        "\u23f3 Analyzing, please wait up to 60 seconds..."
-    )
+    await interaction.channel.send("\u23f3 Analyzing, please wait up to 60 seconds...")
 
     try:
         raw = bot.cache.get_raw(cm.match.match_id)
@@ -408,13 +607,15 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             log.info("Using cached raw data for match %d", cm.match.match_id)
             match_json = enrich_match_data(raw)
         else:
-            log.info("No cached raw data for match %d — using model dump", cm.match.match_id)
+            log.info(
+                "No cached raw data for match %d — using model dump", cm.match.match_id
+            )
             detail = details.get(cm.match.match_id)
             match_json = detail.model_dump() if detail else {}
 
         # Find the requesting player's slot
         player_slot = None
-        for m in matches:
+        for m in pages[current_page]:
             if m.match_id == cm.match.match_id:
                 player_slot = m.player_slot
                 break
@@ -431,18 +632,26 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
                     break
 
         prompt = build_system_prompt(player_data, team, match_json)
-        log.info("Sending LLM request — match_id=%d, hero=%s", cm.match.match_id, cm.hero_name)
+        log.info(
+            "Sending LLM request — match_id=%d, hero=%s",
+            cm.match.match_id,
+            cm.hero_name,
+        )
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, analyze_match, prompt)
         bot.usage.record_llm(user_id)
-        log.info("LLM response received — sections: %s", [k for k, v in result.items() if v])
+        log.info(
+            "LLM response received — sections: %s", [k for k, v in result.items() if v]
+        )
 
         embeds = build_analysis_embeds(result)
         for embed in embeds:
             await interaction.channel.send(embed=embed)
         log.info("AI analysis embeds sent — %d embeds", len(embeds))
     except Exception as e:
-        log.error("AI analysis failed — match_id=%d: %s", cm.match.match_id, e, exc_info=True)
+        log.error(
+            "AI analysis failed — match_id=%d: %s", cm.match.match_id, e, exc_info=True
+        )
         await interaction.channel.send(f"AI analysis failed: {e}")
 
 
@@ -452,17 +661,19 @@ def run_bot() -> None:
     import colorlog
 
     handler = colorlog.StreamHandler()
-    handler.setFormatter(colorlog.ColoredFormatter(
-        fmt="%(asctime)s %(log_color)s%(levelname)-8s%(reset)s %(cyan)s[%(name)s]%(reset)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        log_colors={
-            "DEBUG": "white",
-            "INFO": "green",
-            "WARNING": "yellow",
-            "ERROR": "red",
-            "CRITICAL": "bold_red",
-        },
-    ))
+    handler.setFormatter(
+        colorlog.ColoredFormatter(
+            fmt="%(asctime)s %(log_color)s%(levelname)-8s%(reset)s %(cyan)s[%(name)s]%(reset)s %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            log_colors={
+                "DEBUG": "white",
+                "INFO": "green",
+                "WARNING": "yellow",
+                "ERROR": "red",
+                "CRITICAL": "bold_red",
+            },
+        )
+    )
 
     root = logging.getLogger()
     root.setLevel(logging.INFO)
