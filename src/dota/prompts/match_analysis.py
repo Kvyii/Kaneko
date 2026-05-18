@@ -54,8 +54,10 @@ Response guidelines:
     - E.g. The presence of enemy hard counters, or the presence of allies that synergise well with this hero.
 - Performance of this player in this game, focusing on their role, impact on the game, and how they contributed to the team's success or failure.
     - This analysis should include an assessment of the team to also contribute to their performance if applicable.
-    - Carry/offlane heros should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency and performance.
-    - Mid heros should include an assessment of t he lane efficiency
+    - Carry/Offlane players should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency and performance.
+        - Offlane players should also factor into damage taken and stuns.
+    - Mid players should include an assessment of the lane efficiency and LH@10.
+    - Support players should include an assessement of their warding, stuns, lane efficiency and Teamfight Participation.
     - E.g. Carry heros need space and timings to be brought online. Supports need front line to be able to sustain.
 - Comparison against the players on the other team that are in the same role (e.g. offlane vs offlane, mid vs mid etc.)
 - If there is any Rank Tier information available, you may factor that information in.
@@ -64,6 +66,7 @@ Response guidelines:
 - Combine your findings above to identify the core reasons for the match outcome.
     - E.g. if the player performed well but the team lost, then the core reason may be that the other players on the team underperformed, or that the opposing team outperformed in a way that countered this player's performance.
 - Major factors for the game outcome, such as throws / comebacks, key player contributions, suboptimal players, draft etc.
+- Note the presence of potential smurfs but only if it is incredibly obvious. 
 
 Match data below:
 {match_data}

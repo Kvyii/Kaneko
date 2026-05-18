@@ -38,8 +38,8 @@ _PLAYER_KEEP_FIELDS = {
     # Contribution
     "obs_placed", "sen_placed", "stuns",
     "kill_streaks", "multi_kills",
-    # Damage breakdowns (will be filtered to hero-only)
-    "damage", "damage_taken",
+    # Damage taken breakdown (will be summed into a total)
+    "damage_taken",
     # Timing
     "purchase_log", "gold_t", "lh_t", "xp_t",
     # Buffs
@@ -161,12 +161,11 @@ def _round_floats(obj, decimals: int = 3):
     return obj
 
 
-def _filter_hero_only(damage_dict: dict) -> dict:
-    """Keep only hero-vs-hero damage entries."""
-    return {
-        k: v for k, v in damage_dict.items()
-        if "npc_dota_hero_" in k
-    }
+def _fmt_time(seconds: int) -> str:
+    """Format seconds into 'Xmin Ys' game time."""
+    mins, secs = divmod(abs(seconds), 60)
+    prefix = "-" if seconds < 0 else ""
+    return f"{prefix}{mins}min {secs}s"
 
 
 def _filter_purchase_log(log: list[dict], items_by_key: dict[str, str]) -> list[dict]:
@@ -177,7 +176,7 @@ def _filter_purchase_log(log: list[dict], items_by_key: dict[str, str]) -> list[
         if key in _MINOR_ITEMS or key.startswith("recipe"):
             continue
         filtered.append({
-            "time": entry.get("time"),
+            "time": _fmt_time(entry.get("time", 0)),
             "key": items_by_key.get(key, key),
         })
     return filtered
@@ -219,6 +218,8 @@ def _prepare_player(
     gold_t = result.pop("gold_t", None)
     lh_t = result.pop("lh_t", None)
     xp_t = result.pop("xp_t", None)
+    if lh_t and len(lh_t) > 10:
+        result["lh_at_10"] = lh_t[10]
     if gold_t and lh_t and xp_t:
         progression = {}
         for i in range(0, len(gold_t), 5):
@@ -245,11 +246,9 @@ def _prepare_player(
     if items:
         result["Items"] = items
 
-    # Filter damage dicts to hero-only
-    if "damage" in result and isinstance(result["damage"], dict):
-        result["damage"] = _filter_hero_only(result["damage"])
+    # Sum damage_taken breakdown into a single total
     if "damage_taken" in result and isinstance(result["damage_taken"], dict):
-        result["damage_taken"] = _filter_hero_only(result["damage_taken"])
+        result["damage_taken"] = sum(result["damage_taken"].values())
 
     # Filter purchase_log to major items only, map keys to display names
     if "purchase_log" in result and isinstance(result["purchase_log"], list):
@@ -276,6 +275,7 @@ def _prepare_player(
         "last_hits": "Last Hits",
         "denies": "Denies",
         "hero_damage": "Hero Damage",
+        "damage_taken": "Damage Taken",
         "tower_damage": "Tower Damage",
         "hero_healing": "Hero Healing",
         "gold_spent": "Gold Spent",
@@ -289,8 +289,6 @@ def _prepare_player(
         "stuns": "Stuns (seconds)",
         "kill_streaks": "Kill Streaks",
         "multi_kills": "Multi Kills",
-        "damage": "Damage Dealt (hero only)",
-        "damage_taken": "Damage Taken (hero only)",
         "purchase_log": "Item Purchase Log",
         "progression_per_5min": "Progression (per 5 min)",
         "aghanims_scepter": "Aghanim's Scepter",
