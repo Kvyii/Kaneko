@@ -57,6 +57,7 @@ Response guidelines:
     - This analysis should include an assessment of the team to also contribute to their performance if applicable.
     - Carry/Offlane players should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency, performance and kills/deaths in the first 10 minutes.
         - Offlane players should also factor into damage taken and stuns.
+        - Support heros are not expected to have high last hits in lane, but should have minimal deaths at 10 minutes. 
     - Mid players should include an assessment of the lane efficiency and LH@10.
     - Support players should include an assessement of their warding, stuns, lane efficiency and Teamfight Participation.
     - E.g. Carry heros need space and timings to be brought online. Supports need front line to be able to sustain.
