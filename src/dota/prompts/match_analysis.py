@@ -66,7 +66,7 @@ Response guidelines:
 - Combine your findings above to identify the core reasons for the match outcome.
     - E.g. if the player performed well but the team lost, then the core reason may be that the other players on the team underperformed, or that the opposing team outperformed in a way that countered this player's performance.
 - Major factors for the game outcome, such as throws / comebacks, key player contributions, suboptimal players, draft etc.
-- Note the presence of potential smurfs but only if it is incredibly obvious. 
+- Only the presence of potential smurfs (high rank player using a false low ranked account) but only if it is incredibly obvious. Otherwise avoid speculation and mentioning on smurfs.
 
 Match data below:
 {match_data}
