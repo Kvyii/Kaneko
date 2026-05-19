@@ -537,6 +537,15 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             for i in range(prev_page_size, new_page_size):
                 await message.add_reaction(NUMBER_EMOJIS[i])
 
+    # Block detail view for unparsed matches
+    is_parsed = cm.match_detail is not None and bool(cm.match_detail.radiant_gold_adv)
+    if not is_parsed:
+        log.info("Detail view rejected — match %d is not parsed", cm.match.match_id)
+        await interaction.channel.send(
+            "Sorry, this match has not been parsed by OpenDota yet."
+        )
+        return
+
     # Send detail embed
     hero_icon = bot.hero_icons.get(str(cm.match.hero_id))
     detail_embed = build_detail_embed(cm, hero_icon_url=hero_icon)
@@ -592,13 +601,6 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             return
 
     # Run AI analysis
-    is_parsed = cm.match_detail is not None and bool(cm.match_detail.radiant_gold_adv)
-    if not is_parsed:
-        log.info("AI analysis rejected — match %d is not parsed", cm.match.match_id)
-        await interaction.channel.send(
-            "Sorry, this match has not been parsed by OpenDota yet."
-        )
-        return
     await interaction.channel.send("\u23f3 Analyzing, please wait up to 60 seconds...")
 
     try:

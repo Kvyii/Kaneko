@@ -21,6 +21,7 @@ TYPE_EMOJI = {
     "Stomped": "\U0001f534",  # red circle
     "Comeback": "\U0001f451",  # crown
     "Throw": "\U0001f7e0",  # orange circle
+    "Chaotic": "\U0001f300",  # cyclone
     "Even": "\u26aa",  # white circle
     "-": "\u2796",  # minus
 }

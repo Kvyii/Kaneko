@@ -39,6 +39,7 @@ TYPE_STYLES = {
     "Stomped": "[red]Stomped[/red]",
     "Comeback": "[cyan]Comeback[/cyan]",
     "Throw": "[yellow]Throw[/yellow]",
+    "Chaotic": "[magenta]Chaotic[/magenta]",
     "Even": "Even",
     "-": "-",
 }
