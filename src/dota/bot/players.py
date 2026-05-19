@@ -4,10 +4,13 @@ from pathlib import Path
 
 log = logging.getLogger("dota.bot.players")
 
-PLAYERS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "config" / "players.json"
+PLAYERS_FILE = (
+    Path(__file__).resolve().parent.parent.parent.parent / "config" / "players.json"
+)
 
 DEFAULT_MAX_INFO_PER_HOUR = 5
 DEFAULT_MAX_LLM_PER_HOUR = 3
+DEFAULT_MAX_PARSE_PER_HOUR = 1
 
 
 class PlayerRegistry:
@@ -33,7 +36,9 @@ class PlayerRegistry:
             if migrated:
                 log.info("Migrated %d entries to new format", len(self._data))
                 self._save()
-            log.info("Loaded %d player registrations from %s", len(self._data), self._path)
+            log.info(
+                "Loaded %d player registrations from %s", len(self._data), self._path
+            )
         else:
             log.info("No players file found at %s — starting fresh", self._path)
 
@@ -47,14 +52,19 @@ class PlayerRegistry:
             return None
         return entry["player_id"]
 
-    def get_limits(self, discord_id: int) -> tuple[int, int]:
-        """Returns (max_info_per_hour, max_llm_per_hour)."""
+    def get_limits(self, discord_id: int) -> tuple[int, int, int]:
+        """Returns (max_info_per_hour, max_llm_per_hour, max_parse_per_hour)."""
         entry = self._data.get(str(discord_id))
         if entry is None:
-            return (DEFAULT_MAX_INFO_PER_HOUR, DEFAULT_MAX_LLM_PER_HOUR)
+            return (
+                DEFAULT_MAX_INFO_PER_HOUR,
+                DEFAULT_MAX_LLM_PER_HOUR,
+                DEFAULT_MAX_PARSE_PER_HOUR,
+            )
         return (
             entry.get("max_info_per_hour", DEFAULT_MAX_INFO_PER_HOUR),
             entry.get("max_llm_per_hour", DEFAULT_MAX_LLM_PER_HOUR),
+            entry.get("max_parse_per_hour", DEFAULT_MAX_PARSE_PER_HOUR),
         )
 
     def is_banned(self, discord_id: int) -> bool:

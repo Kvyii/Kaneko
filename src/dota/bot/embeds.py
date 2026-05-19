@@ -183,6 +183,44 @@ def _truncate(text: str, limit: int = 4096) -> str:
     return text
 
 
+def build_parse_embeds(
+    matches: list,
+    total_unparsed: int,
+    heroes: dict[str, str],
+    hero_icons: dict[str, str] | None = None,
+) -> list[discord.Embed]:
+    """Build card-style embeds for matches sent for parsing."""
+    sending = len(matches)
+    header = discord.Embed(
+        title="Parse Requested",
+        description=f"Sending **{sending}** of **{total_unparsed}** unparsed matches for parsing",
+        color=discord.Color.orange(),
+    )
+    embeds = [header]
+
+    for m in matches:
+        hero_name = heroes.get(str(m.hero_id), "Unknown")
+        result = "Win" if m.won else "Loss"
+        embed = discord.Embed(
+            title=hero_name,
+            description=(
+                f"{format_date_discord(m.start_time)}\n"
+                f"{result}  |  KDA: {m.kills}/{m.deaths}/{m.assists}\n"
+                f"Duration: {format_duration(m.duration)}\n"
+                f"Match ID: `{m.match_id}`"
+            ),
+            color=discord.Color.orange(),
+        )
+        if hero_icons:
+            icon_url = hero_icons.get(str(m.hero_id))
+            if icon_url:
+                embed.set_thumbnail(url=icon_url)
+        embeds.append(embed)
+
+    embeds[-1].set_footer(text="Please wait up to 5 minutes for parsing to complete")
+    return embeds
+
+
 def build_analysis_embeds(sections: dict[str, str]) -> list[discord.Embed]:
     """Build up to 3 embeds from the structured LLM response."""
     embeds = []

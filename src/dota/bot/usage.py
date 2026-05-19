@@ -70,6 +70,16 @@ class UsageTracker:
             return (True, 0)
         return (False, _seconds_until_next_hour())
 
+    def check_parse_limit(self, discord_id: int, max_per_hour: int) -> tuple[bool, int]:
+        """Returns (allowed, seconds_until_refresh). If allowed, seconds is 0."""
+        user = self._ensure_user(discord_id)
+        hour = _current_hour()
+        if user.get("parse_hour") != hour:
+            return (True, 0)
+        if user.get("parse_count", 0) < max_per_hour:
+            return (True, 0)
+        return (False, _seconds_until_next_hour())
+
     def record_info(self, discord_id: int) -> None:
         user = self._ensure_user(discord_id)
         hour = _current_hour()
@@ -77,9 +87,20 @@ class UsageTracker:
             user["info_hour"] = hour
             user["info_count"] = 0
         user["info_count"] += 1
-        self._record_command(user, "info")
+        self._record_command(user, "matches")
         self._save()
-        log.debug("Recorded /info for %d — count=%d in hour %s", discord_id, user["info_count"], hour)
+        log.debug("Recorded /matches for %d — count=%d in hour %s", discord_id, user["info_count"], hour)
+
+    def record_parse(self, discord_id: int) -> None:
+        user = self._ensure_user(discord_id)
+        hour = _current_hour()
+        if user.get("parse_hour") != hour:
+            user["parse_hour"] = hour
+            user["parse_count"] = 0
+        user["parse_count"] += 1
+        self._record_command(user, "parse")
+        self._save()
+        log.debug("Recorded /parse for %d — count=%d in hour %s", discord_id, user["parse_count"], hour)
 
     def record_llm(self, discord_id: int) -> None:
         user = self._ensure_user(discord_id)
@@ -108,12 +129,14 @@ class UsageTracker:
         hour = _current_hour()
         info_this_hour = user.get("info_count", 0) if user.get("info_hour") == hour else 0
         llm_this_hour = user.get("llm_count", 0) if user.get("llm_hour") == hour else 0
+        parse_this_hour = user.get("parse_count", 0) if user.get("parse_hour") == hour else 0
         return {
             "commands": dict(user.get("commands", {})),
             "api_calls": user.get("api_calls", 0),
             "llm_calls": user.get("llm_calls", 0),
             "info_this_hour": info_this_hour,
             "llm_this_hour": llm_this_hour,
+            "parse_this_hour": parse_this_hour,
             "seconds_until_refresh": _seconds_until_next_hour(),
         }
 
