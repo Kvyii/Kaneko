@@ -14,6 +14,7 @@ from dota.api.client import OpenDotaClient
 from dota.bot.embeds import (
     build_analysis_embeds,
     build_detail_embed,
+    build_parse_embeds,
     build_summary_embeds,
     format_date_discord,
 )
@@ -109,15 +110,17 @@ class DotaBot(discord.Client):
 
         self.usage = UsageTracker()
 
-        # Active session lock: only one /info at a time
+        # Active session lock: only one /matches at a time
         self._active_session: int | None = (
             None  # discord user id of active session owner
         )
 
     async def setup_hook(self) -> None:
         self.tree.add_command(_register)
-        self.tree.add_command(_info)
+        self.tree.add_command(_matches)
         self.tree.add_command(_usage)
+        self.tree.add_command(_parse)
+        self.tree.add_command(_info)
         # Sync to specific guilds for instant command updates
         guild_env = os.environ.get("DISCORD_GUILD_IDS", "")
         guild_ids = [int(g) for g in guild_env.split(",") if g.strip()]
@@ -192,7 +195,7 @@ async def _usage(interaction: discord.Interaction) -> None:
     bot.usage.record_command(user_id, "usage")
 
     stats = bot.usage.get_usage(user_id)
-    max_info, max_llm = bot.registry.get_limits(user_id)
+    max_info, max_llm, max_parse = bot.registry.get_limits(user_id)
 
     # Lifetime command usage
     cmds = stats["commands"]
@@ -204,6 +207,7 @@ async def _usage(interaction: discord.Interaction) -> None:
     # Remaining calls this hour
     info_remaining = max(0, max_info - stats["info_this_hour"])
     llm_remaining = max(0, max_llm - stats["llm_this_hour"])
+    parse_remaining = max(0, max_parse - stats["parse_this_hour"])
     secs = stats["seconds_until_refresh"]
     mins = secs // 60
     secs = secs % 60
@@ -228,7 +232,8 @@ async def _usage(interaction: discord.Interaction) -> None:
     embed.add_field(
         name="Remaining This Hour",
         value=(
-            f"/info: **{info_remaining}** / {max_info}\n"
+            f"/matches: **{info_remaining}** / {max_info}\n"
+            f"/parse: **{parse_remaining}** / {max_parse}\n"
             f"AI analysis: **{llm_remaining}** / {max_llm}\n"
             f"Refresh in **{mins}m {secs}s**"
         ),
@@ -237,10 +242,10 @@ async def _usage(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@app_commands.command(name="info", description="Show your recent Dota 2 matches")
-async def _info(interaction: discord.Interaction) -> None:
+@app_commands.command(name="matches", description="Show your recent Dota 2 matches")
+async def _matches(interaction: discord.Interaction) -> None:
     user_id = interaction.user.id
-    log.info("/info by %s (%s)", interaction.user, user_id)
+    log.info("/matches by %s (%s)", interaction.user, user_id)
 
     # Guard: banned
     if bot.registry.is_banned(user_id):
@@ -250,7 +255,7 @@ async def _info(interaction: discord.Interaction) -> None:
     # Guard: registration
     player_id = bot.registry.get(user_id)
     if player_id is None:
-        log.info("/info rejected — %s (%s) not registered", interaction.user, user_id)
+        log.info("/matches rejected — %s (%s) not registered", interaction.user, user_id)
         await interaction.response.send_message(
             "You need to register first. Use `/register <player_id>`.",
             ephemeral=True,
@@ -260,7 +265,7 @@ async def _info(interaction: discord.Interaction) -> None:
     # Guard: active session
     if bot._active_session is not None:
         log.info(
-            "/info rejected — session already active (owner=%s)", bot._active_session
+            "/matches rejected — session already active (owner=%s)", bot._active_session
         )
         await interaction.response.send_message(
             "Another session is active. Please wait for it to finish.",
@@ -268,15 +273,15 @@ async def _info(interaction: discord.Interaction) -> None:
         )
         return
 
-    # Guard: hourly info rate limit (owner exempt)
+    # Guard: hourly rate limit (owner exempt)
     if user_id != OWNER_DISCORD_ID:
-        max_info, _ = bot.registry.get_limits(user_id)
+        max_info, _, _ = bot.registry.get_limits(user_id)
         allowed, secs = bot.usage.check_info_limit(user_id, max_info)
         if not allowed:
             mins = secs // 60
             secs = secs % 60
             log.info(
-                "/info rejected — %s (%s) rate limited (%dm %ds remaining)",
+                "/matches rejected — %s (%s) rate limited (%dm %ds remaining)",
                 interaction.user,
                 user_id,
                 mins,
@@ -291,7 +296,7 @@ async def _info(interaction: discord.Interaction) -> None:
     bot._active_session = user_id
     bot.usage.record_info(user_id)
     log.info(
-        "/info session started — %s (%s), player_id=%d",
+        "/matches session started — %s (%s), player_id=%d",
         interaction.user,
         user_id,
         player_id,
@@ -302,7 +307,7 @@ async def _info(interaction: discord.Interaction) -> None:
         await _run_info_session(interaction, player_id)
     finally:
         bot._active_session = None
-        log.info("/info session ended — %s (%s)", interaction.user, user_id)
+        log.info("/matches session ended — %s (%s)", interaction.user, user_id)
 
 
 async def _fetch_page_details(
@@ -627,7 +632,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
 
     # Guard: hourly LLM rate limit (owner exempt)
     if user_id != OWNER_DISCORD_ID:
-        _, max_llm = bot.registry.get_limits(user_id)
+        _, max_llm, _ = bot.registry.get_limits(user_id)
         allowed, secs = bot.usage.check_llm_limit(user_id, max_llm)
         if not allowed:
             mins = secs // 60
@@ -699,6 +704,178 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             "AI analysis failed — match_id=%d: %s", cm.match.match_id, e, exc_info=True
         )
         await interaction.channel.send(f"AI analysis failed: {e}")
+
+
+@app_commands.command(name="info", description="Show available commands and their API costs")
+async def _info(interaction: discord.Interaction) -> None:
+    log.info("/info by %s (%s)", interaction.user, interaction.user.id)
+
+    embed = discord.Embed(
+        title="Kaneko — Commands",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(
+        name="/register <player_id>",
+        value=(
+            "Link your Discord account to your OpenDota player ID.\n"
+            "API calls: **1**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/matches",
+        value=(
+            "Show your last 20 matches with classification, stats, and graphs. "
+            "React with a number to view match details, then with the brain emoji for AI analysis.\n"
+            "API calls: **7+** (profile + W/L + recent + 5 match details per page)"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/parse",
+        value=(
+            "Scan your last 20 matches and request OpenDota to parse up to 4 unparsed replays. "
+            "Parsed matches unlock detailed stats, graphs, and AI analysis.\n"
+            "API calls: **21–61** (recent + up to 20 details + up to 40 for parse requests)\n"
+            "Limit: **1 per hour**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/usage",
+        value=(
+            "Show your lifetime command usage and remaining hourly limits.\n"
+            "API calls: **0**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/info",
+        value=(
+            "Show this help message.\n"
+            "API calls: **0**"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="OpenDota API has a rate limit of 60 calls/min for free tier")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+PARSE_LIMIT = 4
+
+
+@app_commands.command(
+    name="parse", description="Request parsing for your recent unparsed matches"
+)
+async def _parse(interaction: discord.Interaction) -> None:
+    user_id = interaction.user.id
+    log.info("/parse by %s (%s)", interaction.user, user_id)
+
+    if bot.registry.is_banned(user_id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
+    player_id = bot.registry.get(user_id)
+    if player_id is None:
+        log.info("/parse rejected — %s (%s) not registered", interaction.user, user_id)
+        await interaction.response.send_message(
+            "You need to register first. Use `/register <player_id>`.",
+            ephemeral=True,
+        )
+        return
+
+    # Guard: hourly parse rate limit (owner exempt)
+    if user_id != OWNER_DISCORD_ID:
+        _, _, max_parse = bot.registry.get_limits(user_id)
+        allowed, secs = bot.usage.check_parse_limit(user_id, max_parse)
+        if not allowed:
+            mins = secs // 60
+            secs = secs % 60
+            log.info(
+                "/parse rejected — %s (%s) rate limited (%dm %ds remaining)",
+                interaction.user,
+                user_id,
+                mins,
+                secs,
+            )
+            await interaction.response.send_message(
+                f"You have used your maximum allowed usage. Refresh in {mins} minutes {secs} seconds.",
+                ephemeral=True,
+            )
+            return
+
+    bot.usage.record_parse(user_id)
+    await interaction.response.defer()
+
+    api_calls = 0
+
+    # Fetch latest 20 matches
+    try:
+        recent = await bot.client.fetch_recent_matches_async(player_id, limit=MAX_MATCHES)
+        api_calls += 1
+    except Exception as e:
+        log.error("/parse failed to fetch recent matches — player_id=%d", player_id, exc_info=True)
+        await interaction.followup.send(f"Failed to fetch recent matches: {_api_error_msg(e)}")
+        return
+
+    if not recent:
+        await interaction.followup.send("No recent matches found.")
+        return
+
+    # Fetch match details to check parse status
+    match_ids = [m.match_id for m in recent]
+    try:
+        details = await bot.client.fetch_match_details_async(match_ids, cache=bot.cache)
+        cached_count = sum(1 for mid in match_ids if bot.cache.get(mid) is not None)
+        api_calls += len(match_ids) - cached_count
+    except Exception as e:
+        log.error("/parse failed to fetch match details", exc_info=True)
+        await interaction.followup.send(f"Failed to fetch match details: {_api_error_msg(e)}")
+        return
+
+    # Find unparsed matches
+    unparsed = [
+        m for m in recent
+        if m.match_id not in details or not details[m.match_id].radiant_gold_adv
+    ]
+
+    if not unparsed:
+        embed = discord.Embed(
+            title="All Parsed",
+            description="All 20 recent matches are already parsed.",
+            color=discord.Color.green(),
+        )
+        bot.usage.record_api_calls(user_id, api_calls)
+        await interaction.followup.send(embed=embed)
+        return
+
+    # Send up to 4 for parsing
+    to_parse = unparsed[:PARSE_LIMIT]
+    total_unparsed = len(unparsed)
+    parse_ids = [m.match_id for m in to_parse]
+
+    log.info(
+        "/parse sending %d/%d unparsed matches — %s",
+        len(to_parse), total_unparsed, parse_ids,
+    )
+
+    try:
+        await bot.client.request_parse_async(parse_ids)
+        api_calls += len(parse_ids) * 10
+    except Exception as e:
+        log.error("/parse request failed — %s", parse_ids, exc_info=True)
+        await interaction.followup.send(f"Parse request failed: {_api_error_msg(e)}")
+        return
+
+    bot.usage.record_api_calls(user_id, api_calls)
+
+    embeds = build_parse_embeds(
+        to_parse, total_unparsed,
+        heroes=bot.heroes,
+        hero_icons=bot.hero_icons,
+    )
+    await interaction.followup.send(embeds=embeds)
+    log.info("/parse complete — sent %d embeds", len(embeds))
 
 
 def run_bot() -> None:
