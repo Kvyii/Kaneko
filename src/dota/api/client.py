@@ -82,6 +82,19 @@ class OpenDotaClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def fetch_peers_async(self, player_id: int, date: int = 30) -> list[dict]:
+        """Fetch peers (players queued with). date = number of days to look back."""
+        params = {"significant": 0, "date": date}
+        log.info("GET %s/players/%d/peers date=%d significant=0", BASE_URL, player_id, date)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/players/{player_id}/peers",
+                params=params,
+            )
+            log.info("GET /players/%d/peers — %d", player_id, resp.status_code)
+            resp.raise_for_status()
+            return resp.json()
+
     async def request_parse_async(self, match_ids: list[int]) -> list[int]:
         log.info("Requesting parse for %d matches — %s", len(match_ids), match_ids)
         result = await self._request_parse_async(match_ids)

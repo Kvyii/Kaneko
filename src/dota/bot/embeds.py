@@ -155,6 +155,7 @@ def build_detail_embed(
     embed.add_field(name="APM", value=str(s.apm) if s.apm > 0 else "-")
     streak_val = str(s.longest_kill_streak) if s.longest_kill_streak > 0 else "-"
     embed.add_field(name="Kill Streak", value=streak_val)
+    embed.add_field(name="\u200b", value="\u200b")  # spacer to complete row
 
     embed.add_field(name="\u200b\nTeam Contribution", value="\u200b", inline=False)
     embed.add_field(
@@ -220,6 +221,44 @@ def build_parse_embeds(
         embeds.append(embed)
 
     embeds[-1].set_footer(text="Please wait up to 5 minutes for parsing to complete")
+    return embeds
+
+
+def build_peers_embeds(
+    player_name: str,
+    peers: list[dict],
+) -> list[discord.Embed]:
+    """Build card-style embeds for the top peers."""
+    header = discord.Embed(
+        title=f"{player_name}'s Recent Peers (30 days)",
+        description=f"Top **{len(peers)}** most played with",
+        color=discord.Color.blue(),
+    )
+    embeds = [header]
+
+    for i, peer in enumerate(peers, 1):
+        name = peer.get("personaname") or "Unknown"
+        games = peer.get("with_games", 0)
+        wins = peer.get("with_win", 0)
+        win_pct = (wins / games * 100) if games > 0 else 0
+        avg_gpm = peer.get("with_gpm_sum", 0) // games if games > 0 else 0
+        avg_xpm = peer.get("with_xpm_sum", 0) // games if games > 0 else 0
+
+        embed = discord.Embed(
+            title=f"{i}\ufe0f\u20e3  {name}",
+            description=(
+                f"Games: **{games}**  |  Win Rate: **{win_pct:.0f}%**\n"
+                f"Avg GPM: **{avg_gpm}**  |  Avg XPM: **{avg_xpm}**\n"
+                + "\u2500" * 30
+            ),
+            color=discord.Color.blue(),
+        )
+        avatar = peer.get("avatarfull")
+        if avatar:
+            embed.set_thumbnail(url=avatar)
+        embeds.append(embed)
+
+    embeds[-1].set_footer(text="React with a number to view their matches")
     return embeds
 
 
