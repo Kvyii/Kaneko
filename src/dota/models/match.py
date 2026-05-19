@@ -62,6 +62,7 @@ class PlayerDetail(BaseModel):
 class MatchDetail(BaseModel):
     match_id: int
     radiant_gold_adv: list[int] | None = None
+    radiant_xp_adv: list[int] | None = None
     players: list[PlayerDetail] = []
 
 

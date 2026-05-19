@@ -61,6 +61,7 @@ Response guidelines:
     - E.g. Carry heros need space and timings to be brought online. Supports need front line to be able to sustain.
 - Comparison against the players on the other team that are in the same role (e.g. offlane vs offlane, mid vs mid etc.)
 - If there is any Rank Tier information available, you may factor that information in.
+- Context: LH@10 of 50 is considered average for a core, while 80+ is considered very good. 
 
 # Core Reasons
 - Combine your findings above to identify the core reasons for the match outcome.

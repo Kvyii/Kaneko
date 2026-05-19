@@ -18,6 +18,7 @@ from dota.bot.embeds import (
     format_date_discord,
 )
 from dota.bot.players import PlayerRegistry
+from dota.display.graph import generate_advantage_graph
 from dota.bot.usage import UsageTracker
 from dota.cache import MatchCache
 from dota.llm.client import analyze_match
@@ -45,6 +46,36 @@ OWNER_DISCORD_ID = 227439391147032576
 
 
 STEAM_CDN = "https://cdn.cloudflare.steamstatic.com"
+
+
+_HTTP_ERRORS: dict[int, str] = {
+    400: "bad request",
+    401: "unauthorized",
+    403: "forbidden",
+    404: "player or resource not found",
+    429: "rate limited by OpenDota — try again later",
+    500: "OpenDota internal server error",
+    502: "OpenDota bad gateway",
+    503: "OpenDota is temporarily unavailable",
+    504: "OpenDota gateway timeout",
+    521: "OpenDota server is down (Cloudflare 521)",
+    522: "OpenDota connection timed out (Cloudflare 522)",
+    524: "OpenDota request timed out (Cloudflare 524)",
+}
+
+
+def _api_error_msg(exc: Exception) -> str:
+    """Return a user-friendly message from an API exception."""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return _HTTP_ERRORS.get(code, f"HTTP {code}")
+    if isinstance(exc, httpx.TimeoutException):
+        return "request timed out"
+    if isinstance(exc, httpx.ConnectError):
+        return "could not connect to OpenDota"
+    return str(exc)
 
 
 def _load_heroes() -> dict[str, str]:
@@ -311,9 +342,14 @@ async def _fetch_page_details(
         try:
             await bot.client.request_parse_async(unparsed)
             api_calls += len(unparsed) * 10
+            embed = discord.Embed(
+                title="Unparsed Matches Detected",
+                description=ids_list,
+                color=discord.Color.orange(),
+            )
+            await interaction.channel.send(embed=embed)
             await interaction.channel.send(
-                f"Discovered unparsed matches:\n{ids_list}\n\n"
-                f"Requesting the most recent {len(unparsed)} match(es) for parsing. "
+                f"Requesting parsing for {len(unparsed)} match(es). "
                 f"Please wait up to 5 minutes."
             )
         except Exception:
@@ -332,11 +368,11 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     try:
         player = await bot.client.fetch_player_async(player_id)
         api_calls += 1
-    except Exception:
+    except Exception as e:
         log.error(
             "Failed to fetch player profile — player_id=%d", player_id, exc_info=True
         )
-        await interaction.followup.send("Failed to reach OpenDota API.")
+        await interaction.followup.send(f"Failed to fetch player profile: {_api_error_msg(e)}")
         return
 
     profile = player.get("profile", {})
@@ -372,11 +408,11 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
             player_id, limit=fetch_limit
         )
         api_calls += 1
-    except Exception:
+    except Exception as e:
         log.error(
             "Failed to fetch recent matches — player_id=%d", player_id, exc_info=True
         )
-        await interaction.followup.send("Failed to fetch matches.")
+        await interaction.followup.send(f"Failed to fetch recent matches: {_api_error_msg(e)}")
         return
 
     if not all_recent:
@@ -546,10 +582,18 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         )
         return
 
+    # Generate gold/XP advantage graph
+    graph_filename = "advantage.png"
+    gold_adv = cm.match_detail.radiant_gold_adv
+    xp_adv = cm.match_detail.radiant_xp_adv
+    graph_buf = generate_advantage_graph(
+        gold_adv, xp_adv, is_radiant=cm.match.is_radiant,
+    )
+    graph_file = discord.File(fp=graph_buf, filename=graph_filename)
+
     # Send detail embed
-    hero_icon = bot.hero_icons.get(str(cm.match.hero_id))
-    detail_embed = build_detail_embed(cm, hero_icon_url=hero_icon)
-    detail_msg = await interaction.channel.send(embed=detail_embed)
+    detail_embed = build_detail_embed(cm, graph_filename=graph_filename)
+    detail_msg = await interaction.channel.send(embed=detail_embed, file=graph_file)
     log.info("Detail embed sent — message_id=%s", detail_msg.id)
     await detail_msg.add_reaction(BRAIN_EMOJI)
 

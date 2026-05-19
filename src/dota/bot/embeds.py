@@ -49,7 +49,8 @@ def _match_description(cm: ClassifiedMatch) -> str:
         f"LH/DN: **{s.last_hits}/{s.denies}**\n"
         f"GPM: **{s.gpm}**  |  XPM: **{s.xpm}**\n"
         f"Lead: **{fmt_gold(cm.peak_lead)}**  |  Deficit: **{fmt_gold(cm.peak_deficit)}**\n"
-        + "\u2500" * 30
+        + "\u2500"
+        * 30
     )
 
 
@@ -77,7 +78,9 @@ def build_summary_embeds(
             win_pct = wins / total * 100
             loss_pct = losses / total * 100
             lines.append(f"Games this week: **{total}**")
-            lines.append(f"Wins: **{wins}** ({win_pct:.0f}%)  |  Losses: **{losses}** ({loss_pct:.0f}%)")
+            lines.append(
+                f"Wins: **{wins}** ({win_pct:.0f}%)  |  Losses: **{losses}** ({loss_pct:.0f}%)"
+            )
     if weekly_seconds > 0:
         hours = weekly_seconds // 3600
         mins = (weekly_seconds % 3600) // 60
@@ -116,7 +119,8 @@ def build_summary_embeds(
 
 
 def build_detail_embed(
-    cm: ClassifiedMatch, hero_icon_url: str | None = None
+    cm: ClassifiedMatch,
+    graph_filename: str | None = None,
 ) -> discord.Embed:
     m = cm.match
     s = cm.stats
@@ -126,11 +130,11 @@ def build_detail_embed(
     type_icon = TYPE_EMOJI.get(cm.match_type, "")
 
     embed = discord.Embed(
-        title=f"{cm.hero_name} ({cm.lane})",
+        title=f"{cm.hero_name} ({'Radiant' if m.is_radiant else 'Dire'} - {cm.lane})",
         color=color,
     )
-    if hero_icon_url:
-        embed.set_image(url=hero_icon_url)
+    if graph_filename:
+        embed.set_image(url=f"attachment://{graph_filename}")
 
     embed.add_field(name="K/D/A", value=f"**{m.kills}/{m.deaths}/{m.assists}**")
     embed.add_field(name="GPM / XPM", value=f"{s.gpm} / {s.xpm}")
@@ -151,15 +155,25 @@ def build_detail_embed(
     embed.add_field(name="Kill Streak", value=streak_val)
 
     embed.add_field(name="\u200b\nTeam Contribution", value="\u200b", inline=False)
-    embed.add_field(name="Damage", value=f"{fmt_gold(s.hero_damage)}\n{fmt_pct(c.damage)}")
-    embed.add_field(name="Dmg Taken", value=f"{fmt_gold(s.damage_taken)}\n{fmt_pct(c.damage_taken)}")
-    embed.add_field(name="Tower Dmg", value=f"{fmt_gold(s.tower_damage)}\n{fmt_pct(c.tower_damage)}")
+    embed.add_field(
+        name="Damage", value=f"{fmt_gold(s.hero_damage)}\n{fmt_pct(c.damage)}"
+    )
+    embed.add_field(
+        name="Dmg Taken", value=f"{fmt_gold(s.damage_taken)}\n{fmt_pct(c.damage_taken)}"
+    )
+    embed.add_field(
+        name="Tower Dmg", value=f"{fmt_gold(s.tower_damage)}\n{fmt_pct(c.tower_damage)}"
+    )
     embed.add_field(name="Participation", value=fmt_pct(c.fight))
     embed.add_field(name="Vision", value=fmt_pct(c.vision))
     embed.add_field(name="Stuns", value=fmt_pct(c.stuns))
     embed.add_field(name="Lane Eff", value=fmt_pct(c.lane_eff))
     embed.add_field(name="\u200b", value="\u200b")
-    embed.set_footer(text="\U0001f9e0 React to request AI analysis")
+    if graph_filename:
+        embed.add_field(name="\u200b\nGold / EXP Graph", value="\u200b", inline=False)
+    embed.set_footer(
+        text="\U0001f9e0 React to request AI analysis. Each request costs Kv money."
+    )
     return embed
 
 
