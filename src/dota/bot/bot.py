@@ -15,6 +15,7 @@ from dota.bot.embeds import (
     build_analysis_embeds,
     build_detail_embed,
     build_parse_embeds,
+    build_peers_embeds,
     build_summary_embeds,
     format_date_discord,
 )
@@ -120,6 +121,7 @@ class DotaBot(discord.Client):
         self.tree.add_command(_matches)
         self.tree.add_command(_usage)
         self.tree.add_command(_parse)
+        self.tree.add_command(_peers)
         self.tree.add_command(_info)
         # Sync to specific guilds for instant command updates
         guild_env = os.environ.get("DISCORD_GUILD_IDS", "")
@@ -706,6 +708,163 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         await interaction.channel.send(f"AI analysis failed: {e}")
 
 
+PEERS_LIMIT = 5
+
+
+@app_commands.command(name="peers", description="See who you've been playing with recently")
+async def _peers(interaction: discord.Interaction) -> None:
+    user_id = interaction.user.id
+    log.info("/peers by %s (%s)", interaction.user, user_id)
+
+    # Guard: banned
+    if bot.registry.is_banned(user_id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
+    # Guard: registration
+    player_id = bot.registry.get(user_id)
+    if player_id is None:
+        log.info("/peers rejected — %s (%s) not registered", interaction.user, user_id)
+        await interaction.response.send_message(
+            "You need to register first. Use `/register <player_id>`.",
+            ephemeral=True,
+        )
+        return
+
+    # Guard: active session
+    if bot._active_session is not None:
+        log.info(
+            "/peers rejected — session already active (owner=%s)", bot._active_session
+        )
+        await interaction.response.send_message(
+            "Another session is active. Please wait for it to finish.",
+            ephemeral=True,
+        )
+        return
+
+    # Guard: hourly rate limit (owner exempt)
+    if user_id != OWNER_DISCORD_ID:
+        max_info, _, _ = bot.registry.get_limits(user_id)
+        allowed, secs = bot.usage.check_info_limit(user_id, max_info)
+        if not allowed:
+            mins = secs // 60
+            secs = secs % 60
+            log.info(
+                "/peers rejected — %s (%s) rate limited (%dm %ds remaining)",
+                interaction.user,
+                user_id,
+                mins,
+                secs,
+            )
+            await interaction.response.send_message(
+                f"You have used your maximum allowed usage. Refresh in {mins} minutes {secs} seconds.",
+                ephemeral=True,
+            )
+            return
+
+    bot._active_session = user_id
+    bot.usage.record_info(user_id)
+    bot.usage.record_command(user_id, "peers")
+    log.info(
+        "/peers session started — %s (%s), player_id=%d",
+        interaction.user,
+        user_id,
+        player_id,
+    )
+    await interaction.response.defer()
+
+    try:
+        await _run_peers_session(interaction, player_id)
+    finally:
+        bot._active_session = None
+        log.info("/peers session ended — %s (%s)", interaction.user, user_id)
+
+
+async def _run_peers_session(interaction: discord.Interaction, player_id: int) -> None:
+    user_id = interaction.user.id
+    api_calls = 0
+
+    # Fetch player name for the header
+    try:
+        player = await bot.client.fetch_player_async(player_id)
+        api_calls += 1
+    except Exception as e:
+        log.error("Failed to fetch player profile — player_id=%d", player_id, exc_info=True)
+        await interaction.followup.send(f"Failed to fetch player profile: {_api_error_msg(e)}")
+        return
+
+    player_name = player.get("profile", {}).get("personaname", "Unknown")
+
+    # Fetch peers
+    try:
+        all_peers = await bot.client.fetch_peers_async(player_id)
+        api_calls += 1
+    except Exception as e:
+        log.error("Failed to fetch peers — player_id=%d", player_id, exc_info=True)
+        await interaction.followup.send(f"Failed to fetch peers: {_api_error_msg(e)}")
+        return
+
+    if not all_peers:
+        log.info("No peers found — player_id=%d", player_id)
+        await interaction.followup.send("No peers found in the last 30 days.")
+        return
+
+    peers = all_peers[:PEERS_LIMIT]
+    log.info("Found %d peers — displaying %d", len(all_peers), len(peers))
+
+    bot.usage.record_api_calls(user_id, api_calls)
+
+    # Build and send peer embeds
+    embeds = build_peers_embeds(player_name, peers)
+    message = await interaction.followup.send(embeds=embeds, wait=True)
+    log.info("Peers embed sent — message_id=%s", message.id)
+
+    # Add number reactions
+    for i in range(len(peers)):
+        await message.add_reaction(NUMBER_EMOJIS[i])
+
+    # Wait for number reaction
+    valid_emojis = NUMBER_EMOJIS[: len(peers)]
+
+    def check_reaction(reaction: discord.Reaction, user: discord.User) -> bool:
+        return (
+            user.id == user_id
+            and reaction.message.id == message.id
+            and str(reaction.emoji) in valid_emojis
+        )
+
+    log.info("Waiting for peer selection from %s (%s)", interaction.user, user_id)
+
+    try:
+        reaction, _ = await bot.wait_for(
+            "reaction_add", timeout=REACTION_TIMEOUT, check=check_reaction
+        )
+    except TimeoutError:
+        log.info(
+            "Peer selection timed out after %.0fs — %s (%s)",
+            REACTION_TIMEOUT,
+            interaction.user,
+            user_id,
+        )
+        return
+
+    idx = NUMBER_EMOJIS.index(str(reaction.emoji))
+    selected_peer = peers[idx]
+    peer_id = selected_peer["account_id"]
+    peer_name = selected_peer.get("personaname", "Unknown")
+    log.info(
+        "Peer selected — %s (%s) picked #%d: %s (account_id=%d)",
+        interaction.user,
+        user_id,
+        idx + 1,
+        peer_name,
+        peer_id,
+    )
+
+    # Run the full /matches flow for the selected peer
+    await _run_info_session(interaction, peer_id)
+
+
 @app_commands.command(name="info", description="Show available commands and their API costs")
 async def _info(interaction: discord.Interaction) -> None:
     log.info("/info by %s (%s)", interaction.user, interaction.user.id)
@@ -738,6 +897,15 @@ async def _info(interaction: discord.Interaction) -> None:
             "Parsed matches unlock detailed stats, graphs, and AI analysis.\n"
             "API calls: **21–61** (recent + up to 20 details + up to 40 for parse requests)\n"
             "Limit: **1 per hour**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/peers",
+        value=(
+            "See your top 5 most played-with players in the last 30 days. "
+            "React with a number to view their recent matches.\n"
+            "API calls: **9+** (peers + profile + W/L + recent + 5 match details)"
         ),
         inline=False,
     )
