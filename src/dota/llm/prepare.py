@@ -59,6 +59,13 @@ def _load_heroes() -> dict[str, str]:
     return {str(hero_id): data["localized_name"] for hero_id, data in heroes.items()}
 
 
+def _load_hero_npc_map() -> dict[str, int]:
+    """Load NPC name -> hero_id mapping (e.g. 'npc_dota_hero_antimage' -> 1)."""
+    with open(DATA_DIR / "heroes.json") as f:
+        heroes = json.load(f)
+    return {data["name"]: int(hero_id) for hero_id, data in heroes.items() if "name" in data}
+
+
 def _load_rank_tiers() -> dict[str, str]:
     """Load rank tier medal names from data/rank_tiers.json."""
     with open(DATA_DIR / "rank_tiers.json") as f:
@@ -131,11 +138,27 @@ def prepare_for_llm(raw: dict) -> dict:
     if "Game Mode" in match_data and isinstance(match_data["Game Mode"], int):
         match_data["Game Mode"] = game_modes.get(match_data["Game Mode"], str(match_data["Game Mode"]))
 
+    # Build death map keyed by hero_id: hero_id -> list of kill times
+    # Aggregate kills_log (NPC names) from all players, then map to hero_id
+    npc_death_times: dict[str, list[int]] = {}
+    for p in raw.get("players", []):
+        for entry in p.get("kills_log", []):
+            npc_name = entry.get("key", "")
+            t = entry.get("time", 0)
+            npc_death_times.setdefault(npc_name, []).append(t)
+
+    hero_npc_map = _load_hero_npc_map()
+    death_times: dict[int, list[int]] = {}
+    for npc_name, times in npc_death_times.items():
+        hid = hero_npc_map.get(npc_name)
+        if hid is not None:
+            death_times[hid] = times
+
     # Split players into radiant/dire
     radiant = []
     dire = []
     for p in raw.get("players", []):
-        prepared = _prepare_player(p, heroes, items_by_id, items_by_key, rank_tiers)
+        prepared = _prepare_player(p, heroes, items_by_id, items_by_key, rank_tiers, death_times)
         slot = p.get("player_slot", 0)
         prepared.pop("player_slot", None)
         if slot < 128:
@@ -201,9 +224,22 @@ def _prepare_player(
     player: dict, heroes: dict[str, str],
     items_by_id: dict[str, str], items_by_key: dict[str, str],
     rank_tiers: dict[str, str],
+    death_times: dict[int, list[int]] | None = None,
 ) -> dict:
     """Select relevant player fields and map IDs to names."""
     result = {k: v for k, v in player.items() if k in _PLAYER_KEEP_FIELDS}
+
+    # Compute kills in first 10 minutes from this player's kills_log
+    kills_log = player.get("kills_log", [])
+    if kills_log:
+        result["kills_first_10"] = sum(1 for e in kills_log if e.get("time", 0) <= 600)
+
+    # Compute deaths in first 10 minutes from aggregated death_times (keyed by hero_id)
+    hero_id_int = player.get("hero_id")
+    if death_times and hero_id_int is not None:
+        times = death_times.get(hero_id_int)
+        if times:
+            result["deaths_first_10"] = sum(1 for t in times if t <= 600)
 
     # Map rank_tier to readable medal name
     if "rank_tier" in result and isinstance(result["rank_tier"], int):
@@ -266,7 +302,9 @@ def _prepare_player(
         "rank_tier": "Rank Tier",
         "computed_mmr": "Estimated MMR",
         "kills": "Kills",
-        "deaths": "Deaths",
+        "kills_first_10": "Kills in First 10 Minutes",
+        "deaths": "Total Deaths",
+        "deaths_first_10": "Deaths in First 10 Minutes",
         "assists": "Assists",
         "level": "Level",
         "net_worth": "Net Worth",

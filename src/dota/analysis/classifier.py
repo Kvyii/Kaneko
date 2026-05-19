@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from dota.models.match import (
     ClassifiedMatch,
     Contribution,
@@ -6,6 +9,15 @@ from dota.models.match import (
     PlayerStats,
     RecentMatch,
 )
+
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _load_hero_id_to_npc() -> dict[int, str]:
+    """Load hero_id -> NPC name mapping (e.g. 1 -> 'npc_dota_hero_antimage')."""
+    with open(_DATA_DIR / "heroes.json") as f:
+        heroes = json.load(f)
+    return {int(hero_id): data["name"] for hero_id, data in heroes.items() if "name" in data}
 
 
 def find_player(detail: MatchDetail, player_slot: int) -> PlayerDetail | None:
@@ -257,7 +269,27 @@ def get_lane(match: RecentMatch, detail: MatchDetail | None) -> str:
     return lane_map.get(player.lane, "?")
 
 
-def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerStats:
+def _count_deaths_at_10(
+    hero_id: int, detail: MatchDetail, hero_npc_map: dict[int, str],
+) -> int | None:
+    """Count deaths in the first 10 minutes by aggregating kills_log from all players."""
+    npc_name = hero_npc_map.get(hero_id)
+    if npc_name is None:
+        return None
+    count = 0
+    for p in detail.players:
+        if not p.kills_log:
+            continue
+        for entry in p.kills_log:
+            if entry.get("key") == npc_name and entry.get("time", 0) <= 600:
+                count += 1
+    return count
+
+
+def get_player_stats(
+    match: RecentMatch, detail: MatchDetail | None,
+    hero_npc_map: dict[int, str] | None = None,
+) -> PlayerStats:
     if detail is None:
         return PlayerStats()
     player = find_player(detail, match.player_slot)
@@ -266,6 +298,10 @@ def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerSt
     lh_at_10 = None
     if player.lh_t and len(player.lh_t) > 10:
         lh_at_10 = player.lh_t[10]
+
+    deaths_at_10 = None
+    if hero_npc_map:
+        deaths_at_10 = _count_deaths_at_10(match.hero_id, detail, hero_npc_map)
 
     return PlayerStats(
         hero_damage=player.hero_damage,
@@ -282,6 +318,7 @@ def get_player_stats(match: RecentMatch, detail: MatchDetail | None) -> PlayerSt
         party_size=player.party_size,
         longest_kill_streak=player.longest_kill_streak,
         apm=player.actions_per_min,
+        deaths_at_10=deaths_at_10,
     )
 
 
@@ -290,6 +327,7 @@ def build_classified_matches(
     details: dict[int, MatchDetail],
     heroes: dict[str, str],
 ) -> list[ClassifiedMatch]:
+    hero_npc_map = _load_hero_id_to_npc()
     results = []
     for match in matches:
         detail = details.get(match.match_id)
@@ -298,7 +336,7 @@ def build_classified_matches(
         lane = get_lane(match, detail)
         hero_name = heroes.get(str(match.hero_id), f"ID:{match.hero_id}")
 
-        stats = get_player_stats(match, detail)
+        stats = get_player_stats(match, detail, hero_npc_map)
 
         results.append(
             ClassifiedMatch(

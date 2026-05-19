@@ -149,6 +149,8 @@ def build_detail_embed(
     embed.add_field(name="Max Lead", value=fmt_gold(cm.peak_lead))
     embed.add_field(name="Max Deficit", value=fmt_gold(cm.peak_deficit))
     embed.add_field(name="Healing", value=fmt_gold(s.hero_healing))
+    deaths_10_val = str(s.deaths_at_10) if s.deaths_at_10 is not None else "-"
+    embed.add_field(name="Deaths@10", value=deaths_10_val)
     embed.add_field(name="Time Dead", value=format_duration(s.time_dead))
     embed.add_field(name="APM", value=str(s.apm) if s.apm > 0 else "-")
     streak_val = str(s.longest_kill_streak) if s.longest_kill_streak > 0 else "-"
