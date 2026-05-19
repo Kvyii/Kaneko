@@ -45,6 +45,7 @@ class PlayerDetail(BaseModel):
     kill_streaks: dict[str, int] | None = None
     actions_per_min: int = 0
     teamfight_participation: float = 0
+    kills_log: list[dict] | None = None
 
     @property
     def longest_kill_streak(self) -> int:
@@ -91,6 +92,7 @@ class PlayerStats(BaseModel):
     party_size: int = 1
     longest_kill_streak: int = 0
     apm: int = 0
+    deaths_at_10: int | None = None
 
 
 class ClassifiedMatch(BaseModel):

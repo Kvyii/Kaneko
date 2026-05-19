@@ -42,6 +42,7 @@ Response guidelines:
 - Use bullet points and subheadings to structure your analysis clearly.
 - Keep each section to 5 core reasons or insights, prioritising the most impactful ones.
 - Report numbers in thousands using the k suffix (e.g. 1500 as 1.5k). One decimal place.
+- Mention player names in brackets. E.g. Hero (Player Name).
 - You MUST structure your response using exactly these three section headers (with the exact heading text):
 
 # Match Summary
@@ -54,7 +55,7 @@ Response guidelines:
     - E.g. The presence of enemy hard counters, or the presence of allies that synergise well with this hero.
 - Performance of this player in this game, focusing on their role, impact on the game, and how they contributed to the team's success or failure.
     - This analysis should include an assessment of the team to also contribute to their performance if applicable.
-    - Carry/Offlane players should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency and performance.
+    - Carry/Offlane players should include an assessment the LH@10,of the lane efficiency and their lane partner's lane efficiency, performance and kills/deaths in the first 10 minutes.
         - Offlane players should also factor into damage taken and stuns.
     - Mid players should include an assessment of the lane efficiency and LH@10.
     - Support players should include an assessement of their warding, stuns, lane efficiency and Teamfight Participation.
