@@ -68,7 +68,7 @@ uv run dota-bot
 | `/register <player_id>` | Link your Discord account to your [OpenDota](https://www.opendota.com/) player ID | 1 |
 | `/matches` | Browse your last 20 matches. React with a number to view match details, then with the brain emoji for AI analysis | 7+ |
 | `/peers` | See your top 5 most played-with players in the last 30 days. React to view their recent matches | 9+ |
-| `/parse` | Scan your last 20 matches and request parsing for up to 4 unparsed replays (1/hour) | 21-61 |
+| `/parse` | Scan your last 20 matches and request parsing for up to 4 unparsed replays (3/hour) | 21-61 |
 | `/usage` | View your lifetime bot usage stats and remaining hourly rate limits | 0 |
 | `/info` | Show all available commands and their API costs | 0 |
 
