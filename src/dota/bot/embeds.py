@@ -155,6 +155,7 @@ def build_detail_embed(
     embed.add_field(name="APM", value=str(s.apm) if s.apm > 0 else "-")
     streak_val = str(s.longest_kill_streak) if s.longest_kill_streak > 0 else "-"
     embed.add_field(name="Kill Streak", value=streak_val)
+    embed.add_field(name="\u200b", value="\u200b")  # spacer to complete row
 
     embed.add_field(name="\u200b\nTeam Contribution", value="\u200b", inline=False)
     embed.add_field(
