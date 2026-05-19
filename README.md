@@ -7,15 +7,16 @@ Kaneko is a Discord bot that analyzes your Dota 2 matches. It pulls data from th
 
 ## Features
 
-- **Match History** — View your 5 most recent matches with win/loss, hero, K/D/A, duration, and match classification
-- **Match Classification** — Each game is categorized as a Stomp, Stomped, Comeback, Throw, or Even based on gold advantage curves
-- **Detailed Match Stats** — Select any match to see full stats: GPM, XPM, last hits, denies, and contribution percentages for damage, vision, stuns, tower damage, and more
-- **AI Match Analysis** — React with the brain emoji to get an LLM-powered breakdown of any match covering the overall match dynamics, your individual performance, and the core reasons for the win or loss
-- **Player Registration** — Link your Discord account to your OpenDota profile with `/register`
-- **Weekly Stats** — See your win/loss record for the past 7 days
-- **Auto-Parse** — Automatically requests OpenDota to parse unparsed replays
-- **Rate Limiting** — Per-user hourly limits to prevent API abuse
-- **Match Caching** — Caches parsed match data locally to speed up repeated lookups
+- **Match History** — Browse your last 20 matches with win/loss, hero, K/D/A, duration, and match classification. Paginated in groups of 5 with arrow navigation
+- **Match Classification** — Each game is categorized as a Stomp, Stomped, Comeback, Throw, Chaotic, or Even based on gold advantage curve analysis
+- **Detailed Match Stats** — Select any match to see full stats: GPM, XPM, LH@10, Deaths@10, net worth, kill streaks, and team contribution percentages for damage, vision, stuns, tower damage, and more
+- **Gold/XP Graphs** — Visualize the gold and XP advantage over the course of the match
+- **AI Match Analysis** — React with the brain emoji for an LLM-powered breakdown covering match dynamics, individual performance, and the core reasons for the win or loss
+- **Peer Lookup** — View your top 5 most played-with players over the last 30 days, then inspect any of their recent matches
+- **Replay Parsing** — Request OpenDota to parse up to 4 unparsed replays at a time. Parsed matches unlock detailed stats, graphs, and AI analysis
+- **Weekly Overview** — Win/loss record and total game time for the past 7 days
+- **Per-User Rate Limiting** — Hourly limits on commands and AI analysis to prevent API abuse
+- **Match Caching** — Caches parsed match data locally to minimize redundant API calls
 
 ## Screenshots
 
@@ -62,11 +63,14 @@ uv run dota-bot
 
 ## Usage
 
-| Command | Description |
-|---|---|
-| `/register <player_id>` | Link your Discord account to your [OpenDota](https://www.opendota.com/) player ID |
-| `/info` | Show your 5 most recent matches. React with a number emoji to view match details, then react with the brain emoji for AI analysis |
-| `/usage` | View your lifetime bot usage stats and remaining hourly rate limits |
+| Command | Description | API Calls |
+|---|---|---|
+| `/register <player_id>` | Link your Discord account to your [OpenDota](https://www.opendota.com/) player ID | 1 |
+| `/matches` | Browse your last 20 matches. React with a number to view match details, then with the brain emoji for AI analysis | 7+ |
+| `/peers` | See your top 5 most played-with players in the last 30 days. React to view their recent matches | 9+ |
+| `/parse` | Scan your last 20 matches and request parsing for up to 4 unparsed replays (1/hour) | 21-61 |
+| `/usage` | View your lifetime bot usage stats and remaining hourly rate limits | 0 |
+| `/info` | Show all available commands and their API costs | 0 |
 
 ## Data
 
