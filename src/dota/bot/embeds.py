@@ -247,7 +247,8 @@ def build_peers_embeds(
             title=f"{i}\ufe0f\u20e3  {name}",
             description=(
                 f"Games: **{games}**  |  Win Rate: **{win_pct:.0f}%**\n"
-                f"Avg GPM: **{avg_gpm}**  |  Avg XPM: **{avg_xpm}**"
+                f"Avg GPM: **{avg_gpm}**  |  Avg XPM: **{avg_xpm}**\n"
+                + "\u2500" * 30
             ),
             color=discord.Color.blue(),
         )

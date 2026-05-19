@@ -8,6 +8,12 @@ log = logging.getLogger("dota.bot.usage")
 LOGS_DIR = Path(__file__).resolve().parent.parent.parent.parent / ".logs"
 USAGE_FILE = LOGS_DIR / "usage.json"
 
+# Commands that don't count towards the hourly limit
+_EXEMPT_COMMANDS = {"usage", "info"}
+
+# Legacy command names to rename in lifetime stats
+_COMMAND_RENAMES = {"info": "matches"}
+
 
 def _current_hour() -> str:
     return datetime.now().strftime("%Y-%m-%dT%H")
@@ -40,33 +46,23 @@ class UsageTracker:
         key = str(discord_id)
         if key not in self._data:
             self._data[key] = {
-                "info_hour": "",
-                "info_count": 0,
-                "llm_hour": "",
-                "llm_count": 0,
+                "cmd_hour": "",
+                "cmd_count": 0,
+                "parse_hour": "",
+                "parse_count": 0,
                 "api_calls": 0,
                 "llm_calls": 0,
                 "commands": {},
             }
         return self._data[key]
 
-    def check_info_limit(self, discord_id: int, max_per_hour: int) -> tuple[bool, int]:
+    def check_command_limit(self, discord_id: int, max_per_hour: int) -> tuple[bool, int]:
         """Returns (allowed, seconds_until_refresh). If allowed, seconds is 0."""
         user = self._ensure_user(discord_id)
         hour = _current_hour()
-        if user.get("info_hour") != hour:
+        if user.get("cmd_hour") != hour:
             return (True, 0)
-        if user.get("info_count", 0) < max_per_hour:
-            return (True, 0)
-        return (False, _seconds_until_next_hour())
-
-    def check_llm_limit(self, discord_id: int, max_per_hour: int) -> tuple[bool, int]:
-        """Returns (allowed, seconds_until_refresh). If allowed, seconds is 0."""
-        user = self._ensure_user(discord_id)
-        hour = _current_hour()
-        if user.get("llm_hour") != hour:
-            return (True, 0)
-        if user.get("llm_count", 0) < max_per_hour:
+        if user.get("cmd_count", 0) < max_per_hour:
             return (True, 0)
         return (False, _seconds_until_next_hour())
 
@@ -80,16 +76,18 @@ class UsageTracker:
             return (True, 0)
         return (False, _seconds_until_next_hour())
 
-    def record_info(self, discord_id: int) -> None:
+    def record_command(self, discord_id: int, name: str) -> None:
+        """Record a command usage. Counts towards hourly limit unless exempt."""
         user = self._ensure_user(discord_id)
-        hour = _current_hour()
-        if user.get("info_hour") != hour:
-            user["info_hour"] = hour
-            user["info_count"] = 0
-        user["info_count"] += 1
-        self._record_command(user, "matches")
+        if name not in _EXEMPT_COMMANDS:
+            hour = _current_hour()
+            if user.get("cmd_hour") != hour:
+                user["cmd_hour"] = hour
+                user["cmd_count"] = 0
+            user["cmd_count"] += 1
+        self._record_lifetime(user, name)
         self._save()
-        log.debug("Recorded /matches for %d — count=%d in hour %s", discord_id, user["info_count"], hour)
+        log.debug("Recorded /%s for %d", name, discord_id)
 
     def record_parse(self, discord_id: int) -> None:
         user = self._ensure_user(discord_id)
@@ -98,48 +96,46 @@ class UsageTracker:
             user["parse_hour"] = hour
             user["parse_count"] = 0
         user["parse_count"] += 1
-        self._record_command(user, "parse")
+        self._record_lifetime(user, "parse")
         self._save()
         log.debug("Recorded /parse for %d — count=%d in hour %s", discord_id, user["parse_count"], hour)
 
     def record_llm(self, discord_id: int) -> None:
         user = self._ensure_user(discord_id)
-        hour = _current_hour()
-        if user.get("llm_hour") != hour:
-            user["llm_hour"] = hour
-            user["llm_count"] = 0
-        user["llm_count"] += 1
         user["llm_calls"] = user.get("llm_calls", 0) + 1
         self._save()
-        log.debug("Recorded LLM call for %d — count=%d in hour %s", discord_id, user["llm_count"], hour)
+        log.debug("Recorded LLM call for %d", discord_id)
 
     def record_api_calls(self, discord_id: int, count: int) -> None:
         user = self._ensure_user(discord_id)
         user["api_calls"] = user.get("api_calls", 0) + count
         self._save()
 
-    def record_command(self, discord_id: int, name: str) -> None:
-        user = self._ensure_user(discord_id)
-        self._record_command(user, name)
-        self._save()
-
     def get_usage(self, discord_id: int) -> dict:
-        """Return usage stats for a user: commands, api_calls, current hour counts."""
+        """Return usage stats for a user."""
         user = self._ensure_user(discord_id)
         hour = _current_hour()
-        info_this_hour = user.get("info_count", 0) if user.get("info_hour") == hour else 0
-        llm_this_hour = user.get("llm_count", 0) if user.get("llm_hour") == hour else 0
+        cmd_this_hour = user.get("cmd_count", 0) if user.get("cmd_hour") == hour else 0
         parse_this_hour = user.get("parse_count", 0) if user.get("parse_hour") == hour else 0
+
+        # Clean up lifetime commands: apply renames and remove exempt
+        raw_cmds = dict(user.get("commands", {}))
+        cmds: dict[str, int] = {}
+        for name, count in raw_cmds.items():
+            renamed = _COMMAND_RENAMES.get(name, name)
+            if renamed in _EXEMPT_COMMANDS:
+                continue
+            cmds[renamed] = cmds.get(renamed, 0) + count
+
         return {
-            "commands": dict(user.get("commands", {})),
+            "commands": cmds,
             "api_calls": user.get("api_calls", 0),
             "llm_calls": user.get("llm_calls", 0),
-            "info_this_hour": info_this_hour,
-            "llm_this_hour": llm_this_hour,
+            "cmd_this_hour": cmd_this_hour,
             "parse_this_hour": parse_this_hour,
             "seconds_until_refresh": _seconds_until_next_hour(),
         }
 
-    def _record_command(self, user: dict, name: str) -> None:
+    def _record_lifetime(self, user: dict, name: str) -> None:
         cmds = user.setdefault("commands", {})
         cmds[name] = cmds.get(name, 0) + 1

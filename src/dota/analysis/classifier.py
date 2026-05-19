@@ -10,7 +10,7 @@ from dota.models.match import (
     RecentMatch,
 )
 
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+_DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 
 def _load_hero_id_to_npc() -> dict[int, str]:

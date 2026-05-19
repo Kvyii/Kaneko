@@ -8,9 +8,8 @@ PLAYERS_FILE = (
     Path(__file__).resolve().parent.parent.parent.parent / "config" / "players.json"
 )
 
-DEFAULT_MAX_INFO_PER_HOUR = 5
-DEFAULT_MAX_LLM_PER_HOUR = 3
-DEFAULT_MAX_PARSE_PER_HOUR = 1
+DEFAULT_MAX_COMMANDS_PER_HOUR = 5
+DEFAULT_MAX_PARSE_PER_HOUR = 3
 
 
 class PlayerRegistry:
@@ -26,11 +25,7 @@ class PlayerRegistry:
             for key, value in raw.items():
                 if isinstance(value, int):
                     # Auto-migrate old format: discord_id -> player_id
-                    raw[key] = {
-                        "player_id": value,
-                        "max_llm_per_hour": DEFAULT_MAX_LLM_PER_HOUR,
-                        "max_info_per_hour": DEFAULT_MAX_INFO_PER_HOUR,
-                    }
+                    raw[key] = {"player_id": value}
                     migrated = True
             self._data = raw
             if migrated:
@@ -52,18 +47,13 @@ class PlayerRegistry:
             return None
         return entry["player_id"]
 
-    def get_limits(self, discord_id: int) -> tuple[int, int, int]:
-        """Returns (max_info_per_hour, max_llm_per_hour, max_parse_per_hour)."""
+    def get_limits(self, discord_id: int) -> tuple[int, int]:
+        """Returns (max_commands_per_hour, max_parse_per_hour)."""
         entry = self._data.get(str(discord_id))
         if entry is None:
-            return (
-                DEFAULT_MAX_INFO_PER_HOUR,
-                DEFAULT_MAX_LLM_PER_HOUR,
-                DEFAULT_MAX_PARSE_PER_HOUR,
-            )
+            return (DEFAULT_MAX_COMMANDS_PER_HOUR, DEFAULT_MAX_PARSE_PER_HOUR)
         return (
-            entry.get("max_info_per_hour", DEFAULT_MAX_INFO_PER_HOUR),
-            entry.get("max_llm_per_hour", DEFAULT_MAX_LLM_PER_HOUR),
+            entry.get("max_commands_per_hour", DEFAULT_MAX_COMMANDS_PER_HOUR),
             entry.get("max_parse_per_hour", DEFAULT_MAX_PARSE_PER_HOUR),
         )
 
@@ -74,10 +64,6 @@ class PlayerRegistry:
         return entry.get("banned", False)
 
     def register(self, discord_id: int, player_id: int) -> None:
-        self._data[str(discord_id)] = {
-            "player_id": player_id,
-            "max_llm_per_hour": DEFAULT_MAX_LLM_PER_HOUR,
-            "max_info_per_hour": DEFAULT_MAX_INFO_PER_HOUR,
-        }
+        self._data[str(discord_id)] = {"player_id": player_id}
         self._save()
         log.info("Registered discord_id=%d -> player_id=%d", discord_id, player_id)
