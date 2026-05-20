@@ -262,6 +262,28 @@ def build_peers_embeds(
     return embeds
 
 
+def build_rivals_embed(match_rivals: list[dict]) -> discord.Embed:
+    """Build an embed showing rivals found in the current match."""
+    lines = []
+    for r in match_rivals:
+        name = r["personaname"]
+        hero = r["hero_name"]
+        games = r["against_games"]
+        wins = r["against_win"]
+        your_wins = games - wins
+        your_losses = wins
+        pct = (your_wins / games * 100) if games > 0 else 0
+        lines.append(
+            f"**{name}** - {hero} - 3 Month Record: {your_wins}-{your_losses} ({pct:.0f}%)"
+        )
+
+    return discord.Embed(
+        title="\u2694\ufe0f Rival(s) in Game",
+        description="\n".join(lines),
+        color=discord.Color.dark_red(),
+    )
+
+
 def build_analysis_embeds(sections: dict[str, str]) -> list[discord.Embed]:
     """Build up to 3 embeds from the structured LLM response."""
     embeds = []
