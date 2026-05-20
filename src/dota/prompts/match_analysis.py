@@ -22,7 +22,7 @@ Analyse the game from the perspective of the following player:
 
 Team: {team}
 Hero: {hero_name}
-K/D/A: {kills}/{deaths}/{assists}
+Final K/D/A: {kills}/{deaths}/{assists}
 GPM: {gpm} | XPM: {xpm}
 Last Hits/Denies: {last_hits}/{denies}
 LH@10: {lh_at_10}
@@ -93,7 +93,7 @@ def build_system_prompt(
         team=team,
         hero_name=player_data.get("Hero", "Unknown"),
         kills=player_data.get("Kills", 0),
-        deaths=player_data.get("Deaths", 0),
+        deaths=player_data.get("Total Deaths", 0),
         assists=player_data.get("Assists", 0),
         gpm=player_data.get("GPM", 0),
         xpm=player_data.get("XPM", 0),
