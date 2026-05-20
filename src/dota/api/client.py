@@ -95,6 +95,28 @@ class OpenDotaClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def fetch_player_matches_async(
+        self, player_id: int, included_account_id: int, date: int = 365,
+    ) -> list[dict]:
+        """Fetch a player's matches filtered to games with a specific opponent."""
+        params = {
+            "included_account_id": included_account_id,
+            "date": date,
+            "significant": 0,
+        }
+        log.info(
+            "GET %s/players/%d/matches included=%d date=%d",
+            BASE_URL, player_id, included_account_id, date,
+        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{BASE_URL}/players/{player_id}/matches",
+                params=params,
+            )
+            log.info("GET /players/%d/matches — %d", player_id, resp.status_code)
+            resp.raise_for_status()
+            return resp.json()
+
     async def request_parse_async(self, match_ids: list[int]) -> list[int]:
         log.info("Requesting parse for %d matches — %s", len(match_ids), match_ids)
         result = await self._request_parse_async(match_ids)

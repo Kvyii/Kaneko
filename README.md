@@ -12,7 +12,7 @@ Kaneko is a Discord bot that analyzes your Dota 2 matches. It pulls data from th
 - **Detailed Match Stats** — Select any match to see full stats: GPM, XPM, LH@10, Deaths@10, net worth, kill streaks, and team contribution percentages for damage, vision, stuns, tower damage, and more
 - **Gold/XP Graphs** — Visualize the gold and XP advantage over the course of the match
 - **AI Match Analysis** — React with the brain emoji for an LLM-powered breakdown covering match dynamics, individual performance, and the core reasons for the win or loss
-- **Rival Detection** — Automatically identifies frequent opponents (3+ games against in the last 90 days) and surfaces them when you view a match. Rival context is also fed to the AI analysis
+- **Rival Detection** — Automatically identifies frequent opponents (2+ games against in the last 12 months) and surfaces them when you view a match. Rival context is also fed to the AI analysis
 - **Peer Lookup** — View your top 5 most played-with players over the last 30 days, then inspect any of their recent matches
 - **Replay Parsing** — Request OpenDota to parse up to 4 unparsed replays at a time. Parsed matches unlock detailed stats, graphs, and AI analysis
 - **Weekly Overview** — Win/loss record and total game time for the past 7 days
@@ -68,6 +68,7 @@ uv run dota-bot
 |---|---|---|
 | `/register <player_id>` | Link your Discord account to your [OpenDota](https://www.opendota.com/) player ID | 1 |
 | `/matches` | Browse your last 20 matches. React with a number to view match details, then with the brain emoji for AI analysis | 8+ |
+| `/match <match_id>` | View a specific match by ID with detail stats, graph, rival detection, and AI analysis. Auto-requests parsing if needed | 3+ |
 | `/peers` | See your top 5 most played-with players in the last 30 days. React to view their recent matches | 9+ |
 | `/parse` | Scan your last 20 matches and request parsing for up to 4 unparsed replays (3/hour) | 21-61 |
 | `/usage` | View your lifetime bot usage stats and remaining hourly rate limits | 0 |
