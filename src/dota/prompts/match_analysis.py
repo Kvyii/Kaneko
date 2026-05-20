@@ -76,10 +76,27 @@ Match data below:
 """
 
 
+def _build_nemesis_section(rivals: list[dict]) -> str:
+    """Build a nemesis context block for the LLM prompt."""
+    lines = ["Nemesis spotted:"]
+    for r in rivals:
+        games = r["against_games"]
+        wins = r["against_win"]
+        your_wins = games - wins
+        your_losses = wins
+        pct = (your_wins / games * 100) if games > 0 else 0
+        lines.append(
+            f"{r['personaname']} - {r['hero_name']}: "
+            f"3 Month Record: {your_wins}-{your_losses} ({pct:.0f}%)"
+        )
+    return "\n".join(lines)
+
+
 def build_system_prompt(
     player_data: dict,
     team: str,
     match_json: dict,
+    rivals: list[dict] | None = None,
 ) -> str:
     """Build the system prompt with player context and match data filled in."""
     mode_value = match_json.get("match_data", {}).get("Game Mode", "Unknown")
@@ -89,7 +106,7 @@ def build_system_prompt(
         game_modes = _load_game_modes()
         game_mode = game_modes.get(mode_value, f"Unknown ({mode_value})")
 
-    return SYSTEM_PROMPT.format(
+    prompt = SYSTEM_PROMPT.format(
         team=team,
         hero_name=player_data.get("Hero", "Unknown"),
         kills=player_data.get("Kills", 0),
@@ -105,3 +122,12 @@ def build_system_prompt(
         game_mode=game_mode,
         match_data=json.dumps(match_json, indent=2),
     )
+
+    if rivals:
+        nemesis_text = _build_nemesis_section(rivals)
+        prompt = prompt.replace(
+            "Match data below:",
+            nemesis_text + "\n\nMatch data below:",
+        )
+
+    return prompt

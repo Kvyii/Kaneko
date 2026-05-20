@@ -16,6 +16,7 @@ from dota.bot.embeds import (
     build_detail_embed,
     build_parse_embeds,
     build_peers_embeds,
+    build_rivals_embed,
     build_summary_embeds,
     format_date_discord,
 )
@@ -367,10 +368,41 @@ async def _fetch_page_details(
     return api_calls
 
 
+async def _fetch_rivals(player_id: int) -> dict[int, dict]:
+    """Fetch 90-day peers and filter to frequent opponents (rivals).
+
+    Returns dict keyed by account_id with rival info.
+    Failures return an empty dict silently.
+    """
+    try:
+        peers = await bot.client.fetch_peers_async(player_id, date=90)
+    except Exception:
+        log.warning("Rivals fetch failed — player_id=%d", player_id, exc_info=True)
+        return {}
+
+    rivals = {}
+    for peer in peers:
+        against_games = peer.get("against_games", 0)
+        if against_games > 3:
+            account_id = peer.get("account_id")
+            if account_id:
+                rivals[account_id] = {
+                    "personaname": peer.get("personaname") or "Unknown",
+                    "against_games": against_games,
+                    "against_win": peer.get("against_win", 0),
+                }
+    log.info("Rivals fetched — player_id=%d, found %d rivals", player_id, len(rivals))
+    return rivals
+
+
 async def _run_info_session(interaction: discord.Interaction, player_id: int) -> None:
     user_id = interaction.user.id
 
     api_calls = 0
+
+    # Fire off rivals fetch in background (90-day peers, filtered to opponents)
+    rivals_task = asyncio.create_task(_fetch_rivals(player_id))
+    bot.usage.record_api_calls(user_id, 1)  # rivals peers fetch
 
     # Fetch player profile
     log.info("Fetching player profile — player_id=%d", player_id)
@@ -593,6 +625,40 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
         )
         return
 
+    # Resolve rivals (should be done by now since user spent time navigating)
+    rivals = {}
+    try:
+        rivals = await rivals_task
+    except Exception:
+        log.warning("Rivals task failed", exc_info=True)
+
+    # Cross-reference match players against rival list
+    match_rivals = []
+    if rivals:
+        raw = bot.cache.get_raw(cm.match.match_id)
+        if raw:
+            for p in raw.get("players", []):
+                acct = p.get("account_id")
+                if acct and acct in rivals:
+                    hero_id = p.get("hero_id")
+                    hero_name = bot.heroes.get(str(hero_id), "Unknown")
+                    rival_info = rivals[acct]
+                    match_rivals.append({
+                        "personaname": rival_info["personaname"],
+                        "hero_name": hero_name,
+                        "against_games": rival_info["against_games"],
+                        "against_win": rival_info["against_win"],
+                    })
+
+    # Send rival embed if any found
+    if match_rivals:
+        rival_embed = build_rivals_embed(match_rivals)
+        await interaction.channel.send(embed=rival_embed)
+        log.info(
+            "Rival embed sent — %d rival(s) found in match %d",
+            len(match_rivals), cm.match.match_id,
+        )
+
     # Generate gold/XP advantage graph
     graph_filename = "advantage.png"
     gold_adv = cm.match_detail.radiant_gold_adv
@@ -671,7 +737,10 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
                     player_data = p
                     break
 
-        prompt = build_system_prompt(player_data, team, match_json)
+        prompt = build_system_prompt(
+            player_data, team, match_json,
+            rivals=match_rivals if match_rivals else None,
+        )
         log.info(
             "Sending LLM request — match_id=%d, hero=%s",
             cm.match.match_id,
@@ -879,7 +948,7 @@ async def _info(interaction: discord.Interaction) -> None:
         value=(
             "Show your last 20 matches with classification, stats, and graphs. "
             "React with a number to view match details, then with the brain emoji for AI analysis.\n"
-            "API calls: **7+** (profile + W/L + recent + 5 match details per page)"
+            "API calls: **8+** (profile + W/L + recent + rivals + 5 match details per page)"
         ),
         inline=False,
     )
