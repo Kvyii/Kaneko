@@ -47,7 +47,7 @@ _PLAYER_KEEP_FIELDS = {
 }
 
 _MATCH_KEEP_FIELDS = {
-    "match_id", "radiant_gold_adv", "radiant_xp_adv",
+    "radiant_gold_adv", "radiant_xp_adv",
     "duration", "radiant_win", "radiant_score", "dire_score",
     "game_mode", "first_blood_time",
 }
@@ -125,10 +125,9 @@ def prepare_for_llm(raw: dict) -> dict:
         "radiant_win": "Radiant Win",
         "radiant_score": "Radiant Kills",
         "dire_score": "Dire Kills",
-        "first_blood_time": "First Blood Time (seconds)",
-        "duration": "Duration (seconds)",
+        "first_blood_time": "First Blood Time",
+        "duration": "Duration",
         "game_mode": "Game Mode",
-        "match_id": "Match ID",
     }
     for old, new in _MATCH_RENAMES.items():
         if old in match_data:
@@ -137,6 +136,11 @@ def prepare_for_llm(raw: dict) -> dict:
     # Map game mode ID to human-readable name
     if "Game Mode" in match_data and isinstance(match_data["Game Mode"], int):
         match_data["Game Mode"] = game_modes.get(match_data["Game Mode"], str(match_data["Game Mode"]))
+
+    # Format time fields to human-readable "Xmin Ys"
+    for key in ("First Blood Time", "Duration"):
+        if key in match_data and isinstance(match_data[key], (int, float)):
+            match_data[key] = _fmt_time(int(match_data[key]))
 
     # Build death map keyed by hero_id: hero_id -> list of kill times
     # Aggregate kills_log (NPC names) from all players, then map to hero_id
@@ -294,7 +298,7 @@ def _prepare_player(
     if "teamfight_participation" in result and isinstance(result["teamfight_participation"], (int, float)):
         result["teamfight_participation"] = round(result["teamfight_participation"] * 100, 1)
 
-    # Rename fields to human-readable names
+    # Rename fields to human-readable names (ordered so Items appears before Item Purchase Log)
     _PLAYER_RENAMES = {
         "hero_name": "Hero",
         "personaname": "Player Name",
@@ -327,15 +331,23 @@ def _prepare_player(
         "stuns": "Stuns (seconds)",
         "kill_streaks": "Kill Streaks",
         "multi_kills": "Multi Kills",
+        "Items": "Items",
         "purchase_log": "Item Purchase Log",
         "progression_per_5min": "Progression (per 5 min)",
         "aghanims_scepter": "Aghanim's Scepter",
         "aghanims_shard": "Aghanim's Shard",
         "moonshard": "Moon Shard",
     }
+    # Rebuild result in rename order to control field ordering
+    renamed = {}
     for old, new in _PLAYER_RENAMES.items():
         if old in result:
-            result[new] = result.pop(old)
+            renamed[new] = result.pop(old)
+        elif new in result:
+            renamed[new] = result.pop(new)
+    # Append any remaining fields not in the rename map
+    renamed.update(result)
+    result = renamed
 
     # Round all floats to 3 decimal places
     result = _round_floats(result)
