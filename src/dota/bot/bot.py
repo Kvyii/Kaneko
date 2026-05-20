@@ -502,6 +502,7 @@ async def _run_single_match_session(
                     rt = p.get("rank_tier")
                     rank = _map_rank_tier(rt, bot.rank_tiers) if isinstance(rt, int) else "Unranked"
                     match_rivals.append({
+                        "account_id": acct,
                         "personaname": rival_info["personaname"],
                         "hero_name": rival_hero,
                         "against_games": rival_info["against_games"],
@@ -509,8 +510,9 @@ async def _run_single_match_session(
                         "rank": rank,
                     })
 
-    # Send rival embed if any found
+    # Enrich rivals with historical KDA and send embed
     if match_rivals:
+        await _enrich_rivals_with_history(match_rivals, player_id, user_id)
         rival_embed = build_rivals_embed(match_rivals)
         await interaction.followup.send(embed=rival_embed)
         log.info(
@@ -682,6 +684,46 @@ async def _fetch_rivals(player_id: int) -> dict[int, dict]:
                 }
     log.info("Rivals fetched — player_id=%d, found %d rivals", player_id, len(rivals))
     return rivals
+
+
+def _avg_kda(matches: list[dict]) -> str | None:
+    """Compute average K/D/A from a list of match dicts. Returns 'K/D/A' or None."""
+    if not matches:
+        return None
+    n = len(matches)
+    avg_k = sum(m.get("kills", 0) for m in matches) / n
+    avg_d = sum(m.get("deaths", 0) for m in matches) / n
+    avg_a = sum(m.get("assists", 0) for m in matches) / n
+    return f"{avg_k:.1f}/{avg_d:.1f}/{avg_a:.1f}"
+
+
+async def _enrich_rivals_with_history(
+    match_rivals: list[dict], player_id: int, user_id: int,
+) -> None:
+    """Enrich each rival dict with historical avg KDA for both sides.
+
+    Adds 'player_avg_kda' and 'rival_avg_kda' keys in-place.
+    2 API calls per rival.
+    """
+    for rival in match_rivals:
+        rival_id = rival.get("account_id")
+        if not rival_id:
+            continue
+        try:
+            player_matches, rival_matches = await asyncio.gather(
+                bot.client.fetch_player_matches_async(player_id, rival_id),
+                bot.client.fetch_player_matches_async(rival_id, player_id),
+                return_exceptions=True,
+            )
+            if not isinstance(player_matches, Exception):
+                rival["player_avg_kda"] = _avg_kda(player_matches)
+            if not isinstance(rival_matches, Exception):
+                rival["rival_avg_kda"] = _avg_kda(rival_matches)
+        except Exception:
+            log.warning(
+                "Rival history fetch failed — rival_id=%d", rival_id, exc_info=True,
+            )
+        bot.usage.record_api_calls(user_id, 2)
 
 
 async def _run_info_session(interaction: discord.Interaction, player_id: int) -> None:
@@ -940,6 +982,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
                     rt = p.get("rank_tier")
                     rank = _map_rank_tier(rt, bot.rank_tiers) if isinstance(rt, int) else "Unranked"
                     match_rivals.append({
+                        "account_id": acct,
                         "personaname": rival_info["personaname"],
                         "hero_name": hero_name,
                         "against_games": rival_info["against_games"],
@@ -947,8 +990,9 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
                         "rank": rank,
                     })
 
-    # Send rival embed if any found
+    # Enrich rivals with historical KDA and send embed
     if match_rivals:
+        await _enrich_rivals_with_history(match_rivals, player_id, user_id)
         rival_embed = build_rivals_embed(match_rivals)
         await interaction.channel.send(embed=rival_embed)
         log.info(
@@ -1245,7 +1289,7 @@ async def _info(interaction: discord.Interaction) -> None:
         value=(
             "Show your last 20 matches with classification, stats, and graphs. "
             "React with a number to view match details, then with the brain emoji for AI analysis.\n"
-            "API calls: **8+** (profile + W/L + recent + rivals + 5 match details per page)"
+            "API calls: **8+** (profile + W/L + recent + rivals + 5 match details per page + 2 per rival)"
         ),
         inline=False,
     )
@@ -1254,7 +1298,7 @@ async def _info(interaction: discord.Interaction) -> None:
         value=(
             "View a specific match by ID. Shows detail stats, graph, rival detection, "
             "and AI analysis. Auto-requests parsing if the match isn't parsed yet.\n"
-            "API calls: **3+** (match detail + rivals + parse if needed)"
+            "API calls: **3+** (match detail + rivals + 2 per rival + parse if needed)"
         ),
         inline=False,
     )

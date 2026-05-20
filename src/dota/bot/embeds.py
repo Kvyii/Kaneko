@@ -264,8 +264,9 @@ def build_peers_embeds(
 
 def build_rivals_embed(match_rivals: list[dict]) -> discord.Embed:
     """Build an embed showing rivals found in the current match."""
+    sorted_rivals = sorted(match_rivals, key=lambda r: r["against_games"], reverse=True)
     lines = []
-    for r in match_rivals:
+    for r in sorted_rivals:
         name = r["personaname"]
         hero = r["hero_name"]
         games = r["against_games"]
@@ -274,16 +275,24 @@ def build_rivals_embed(match_rivals: list[dict]) -> discord.Embed:
         your_losses = wins
         pct = (your_wins / games * 100) if games > 0 else 0
         rank = r.get("rank", "Unknown")
-        lines.append(
-            f"**{name}** (Rank: {rank}) - {hero} - {your_wins}W {your_losses}L ({pct:.0f}%)"
-        )
+        line = f"- **{name}** ({rank}) \u2014 {hero} \u00b7 {your_wins}W {your_losses}L ({pct:.0f}%)"
+        player_kda = r.get("player_avg_kda")
+        rival_kda = r.get("rival_avg_kda")
+        if player_kda and rival_kda:
+            line += f"\n  You: {player_kda} vs Them: {rival_kda}"
+        elif player_kda:
+            line += f"\n  You: {player_kda}"
+        elif rival_kda:
+            line += f"\n  Them: {rival_kda}"
+        lines.append(line)
 
     embed = discord.Embed(
         title="\u2694\ufe0f Rival(s) in Game",
         description="\n".join(lines),
         color=discord.Color.dark_red(),
     )
-    embed.set_footer(text="W/L over the last 12 months")
+
+    embed.set_footer(text="Stats over the last 12 months")
     return embed
 
 

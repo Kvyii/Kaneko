@@ -81,7 +81,7 @@ _RIVALS_INSTRUCTIONS = """You MUST also include the following fourth section:
 
 # Rivals
 - A rival is an opponent that the player repeatedly encounters over the last 12 months.
-- Give a brief insight about the rival dynamic: how the rival's hero pick interacts with the player's hero, whether the matchup favours the player or the rival, and any notable patterns from the game (e.g. did the rival dominate lane, feed, carry, etc.).
+- Focus on the rivalry dynamic: who historically dominates based on the avg KDA data, whether the trend favours the player or the rival, and how this game fits into that pattern.
 - Keep it concise — one short paragraph per rival."""
 
 
@@ -95,10 +95,17 @@ def _build_rivals_section(rivals: list[dict]) -> str:
         your_losses = wins
         pct = (your_wins / games * 100) if games > 0 else 0
         rank = r.get("rank", "Unknown")
-        lines.append(
+        entry = (
             f"{r['personaname']} (Rank: {rank}) - {r['hero_name']}: "
             f"{your_wins}W {your_losses}L ({pct:.0f}%)"
         )
+        player_kda = r.get("player_avg_kda")
+        rival_kda = r.get("rival_avg_kda")
+        if player_kda:
+            entry += f"\n  Player avg KDA vs rival: {player_kda}"
+        if rival_kda:
+            entry += f"\n  Rival avg KDA vs player: {rival_kda}"
+        lines.append(entry)
     return "\n".join(lines)
 
 
