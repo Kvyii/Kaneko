@@ -9,7 +9,14 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
-from dota.analysis.classifier import build_classified_matches
+from dota.analysis.classifier import (
+    build_classified_matches,
+    classify_match,
+    compute_contribution,
+    get_lane,
+    get_player_stats,
+)
+from dota.models.match import ClassifiedMatch, RecentMatch
 from dota.api.client import OpenDotaClient
 from dota.bot.embeds import (
     build_analysis_embeds,
@@ -25,7 +32,7 @@ from dota.bot.usage import UsageTracker
 from dota.cache import MatchCache
 from dota.display.graph import generate_advantage_graph
 from dota.llm.client import analyze_match
-from dota.llm.prepare import enrich_match_data
+from dota.llm.prepare import _load_rank_tiers, _map_rank_tier, enrich_match_data
 from dota.prompts.match_analysis import build_system_prompt
 
 log = logging.getLogger("dota.bot")
@@ -109,6 +116,7 @@ class DotaBot(discord.Client):
         self.client = OpenDotaClient()
         self.heroes = _load_heroes()
         self.hero_icons = _load_hero_icons()
+        self.rank_tiers = _load_rank_tiers()
 
         self.usage = UsageTracker()
 
@@ -120,6 +128,7 @@ class DotaBot(discord.Client):
     async def setup_hook(self) -> None:
         self.tree.add_command(_register)
         self.tree.add_command(_matches)
+        self.tree.add_command(_match)
         self.tree.add_command(_usage)
         self.tree.add_command(_parse)
         self.tree.add_command(_peers)
@@ -311,6 +320,286 @@ async def _matches(interaction: discord.Interaction) -> None:
         log.info("/matches session ended — %s (%s)", interaction.user, user_id)
 
 
+@app_commands.command(name="match", description="View a specific match by ID")
+@app_commands.describe(match_id="The match ID to look up")
+async def _match(interaction: discord.Interaction, match_id: int) -> None:
+    user_id = interaction.user.id
+    log.info("/match %d by %s (%s)", match_id, interaction.user, user_id)
+
+    # Guard: banned
+    if bot.registry.is_banned(user_id):
+        await interaction.response.send_message("You have been banned.", ephemeral=True)
+        return
+
+    # Guard: registration
+    player_id = bot.registry.get(user_id)
+    if player_id is None:
+        log.info("/match rejected — %s (%s) not registered", interaction.user, user_id)
+        await interaction.response.send_message(
+            "You need to register first. Use `/register <player_id>`.",
+            ephemeral=True,
+        )
+        return
+
+    # Guard: active session
+    if bot._active_session is not None:
+        log.info("/match rejected — session already active (owner=%s)", bot._active_session)
+        await interaction.response.send_message(
+            "Another session is active. Please wait for it to finish.",
+            ephemeral=True,
+        )
+        return
+
+    # Guard: hourly rate limit (owner exempt)
+    if user_id != OWNER_DISCORD_ID:
+        max_cmds, _ = bot.registry.get_limits(user_id)
+        allowed, secs = bot.usage.check_command_limit(user_id, max_cmds)
+        if not allowed:
+            mins = secs // 60
+            secs = secs % 60
+            log.info(
+                "/match rejected — %s (%s) rate limited (%dm %ds remaining)",
+                interaction.user, user_id, mins, secs,
+            )
+            await interaction.response.send_message(
+                f"You have used your maximum allowed usage. Refresh in {mins} minutes {secs} seconds.",
+                ephemeral=True,
+            )
+            return
+
+    bot._active_session = user_id
+    bot.usage.record_command(user_id, "match")
+    log.info("/match session started — %s (%s), match_id=%d", interaction.user, user_id, match_id)
+    await interaction.response.defer()
+
+    try:
+        await _run_single_match_session(interaction, player_id, match_id)
+    finally:
+        bot._active_session = None
+        log.info("/match session ended — %s (%s)", interaction.user, user_id)
+
+
+async def _run_single_match_session(
+    interaction: discord.Interaction, player_id: int, match_id: int,
+) -> None:
+    user_id = interaction.user.id
+
+    # Fire off rivals fetch in background
+    rivals_task = asyncio.create_task(_fetch_rivals(player_id))
+    bot.usage.record_api_calls(user_id, 1)  # rivals peers fetch
+
+    # Fetch match detail
+    log.info("Fetching match detail — match_id=%d", match_id)
+    try:
+        details = await bot.client.fetch_match_details_async([match_id], cache=bot.cache)
+        bot.usage.record_api_calls(user_id, 1)
+    except Exception as e:
+        log.error("Failed to fetch match %d: %s", match_id, e, exc_info=True)
+        await interaction.followup.send(f"Failed to fetch match: {_api_error_msg(e)}")
+        return
+
+    detail = details.get(match_id)
+    if detail is None:
+        await interaction.followup.send(f"Match `{match_id}` not found.")
+        return
+
+    # Check if parsed
+    is_parsed = detail.radiant_gold_adv is not None and bool(detail.radiant_gold_adv)
+    if not is_parsed:
+        log.info("Match %d is not parsed — requesting parse", match_id)
+        try:
+            await bot.client.request_parse_async([match_id])
+            bot.usage.record_api_calls(user_id, 10)
+        except Exception:
+            log.warning("Parse request failed for %d", match_id, exc_info=True)
+        await interaction.followup.send(
+            f"Match `{match_id}` has not been parsed by OpenDota yet. "
+            "A parse request has been submitted — please wait ~5 minutes and try again."
+        )
+        return
+
+    # Find the player in the match via raw cached data (has account_id)
+    raw_data = bot.cache.get_raw(match_id) or {}
+    player_detail = None
+    for rp in raw_data.get("players", []):
+        if rp.get("account_id") == player_id:
+            slot = rp.get("player_slot")
+            for p in detail.players:
+                if p.player_slot == slot:
+                    player_detail = p
+                    break
+            break
+
+    if player_detail is None:
+        await interaction.followup.send(
+            f"Your account was not found in match `{match_id}`."
+        )
+        return
+
+    # Build a RecentMatch from the detail data for classifier compatibility
+    recent = RecentMatch(
+        match_id=match_id,
+        player_slot=player_detail.player_slot,
+        radiant_win=raw_data.get("radiant_win", False),
+        hero_id=next(
+            (rp.get("hero_id", 0) for rp in raw_data.get("players", [])
+             if rp.get("player_slot") == player_detail.player_slot),
+            0,
+        ),
+        kills=player_detail.kills,
+        deaths=next(
+            (rp.get("deaths", 0) for rp in raw_data.get("players", [])
+             if rp.get("player_slot") == player_detail.player_slot),
+            0,
+        ),
+        assists=player_detail.assists,
+        duration=raw_data.get("duration", 0),
+        start_time=raw_data.get("start_time", 0),
+    )
+
+    # Classify the match
+    match_type, peak_lead, peak_deficit = classify_match(recent, detail)
+    contribution = compute_contribution(recent, detail)
+    lane = get_lane(recent, detail)
+    hero_name = bot.heroes.get(str(recent.hero_id), f"ID:{recent.hero_id}")
+    stats = get_player_stats(recent, detail)
+
+    cm = ClassifiedMatch(
+        match=recent,
+        match_type=match_type,
+        peak_lead=peak_lead,
+        peak_deficit=peak_deficit,
+        contribution=contribution,
+        stats=stats,
+        lane=lane,
+        hero_name=hero_name,
+        match_detail=detail,
+    )
+
+    # Resolve rivals
+    rivals = {}
+    try:
+        rivals = await rivals_task
+    except Exception:
+        log.warning("Rivals task failed", exc_info=True)
+
+    # Cross-reference enemy players against rival list
+    match_rivals = []
+    if rivals:
+        raw = bot.cache.get_raw(match_id)
+        if raw:
+            is_radiant = recent.is_radiant
+            for p in raw.get("players", []):
+                # Only check opponents
+                p_is_radiant = p.get("player_slot", 0) < 128
+                if p_is_radiant == is_radiant:
+                    continue
+                acct = p.get("account_id")
+                if acct and acct in rivals:
+                    hero_id = p.get("hero_id")
+                    rival_hero = bot.heroes.get(str(hero_id), "Unknown")
+                    rival_info = rivals[acct]
+                    rt = p.get("rank_tier")
+                    rank = _map_rank_tier(rt, bot.rank_tiers) if isinstance(rt, int) else "Unranked"
+                    match_rivals.append({
+                        "personaname": rival_info["personaname"],
+                        "hero_name": rival_hero,
+                        "against_games": rival_info["against_games"],
+                        "against_win": rival_info["against_win"],
+                        "rank": rank,
+                    })
+
+    # Send rival embed if any found
+    if match_rivals:
+        rival_embed = build_rivals_embed(match_rivals)
+        await interaction.followup.send(embed=rival_embed)
+        log.info(
+            "Rival embed sent — %d rival(s) found in match %d",
+            len(match_rivals), match_id,
+        )
+
+    # Generate gold/XP advantage graph
+    graph_filename = "advantage.png"
+    gold_adv = detail.radiant_gold_adv
+    xp_adv = detail.radiant_xp_adv
+    graph_buf = generate_advantage_graph(
+        gold_adv, xp_adv, is_radiant=recent.is_radiant,
+    )
+    graph_file = discord.File(fp=graph_buf, filename=graph_filename)
+
+    # Send detail embed
+    detail_embed = build_detail_embed(cm, graph_filename=graph_filename)
+    detail_msg = await interaction.channel.send(embed=detail_embed, file=graph_file)
+    log.info("Detail embed sent — message_id=%s", detail_msg.id)
+    await detail_msg.add_reaction(BRAIN_EMOJI)
+
+    # Wait for brain reaction
+    log.info("Waiting for AI analysis reaction from %s (%s)", interaction.user, user_id)
+
+    def check_brain(reaction: discord.Reaction, user: discord.User) -> bool:
+        return (
+            user.id == user_id
+            and reaction.message.id == detail_msg.id
+            and str(reaction.emoji) == BRAIN_EMOJI
+        )
+
+    try:
+        await bot.wait_for("reaction_add", timeout=REACTION_TIMEOUT, check=check_brain)
+    except TimeoutError:
+        log.info(
+            "AI analysis reaction timed out after %.0fs — %s (%s)",
+            REACTION_TIMEOUT, interaction.user, user_id,
+        )
+        return
+
+    log.info(
+        "AI analysis requested — %s (%s), match_id=%d",
+        interaction.user, user_id, match_id,
+    )
+
+    # Run AI analysis
+    await interaction.channel.send("\u23f3 Analyzing, please wait up to 60 seconds...")
+
+    try:
+        raw = bot.cache.get_raw(match_id)
+        if raw:
+            match_json = enrich_match_data(raw)
+        else:
+            match_json = detail.model_dump()
+
+        player_slot = player_detail.player_slot
+        team = "Radiant" if player_slot < 128 else "Dire"
+        team_key = "radiant" if team == "Radiant" else "dire"
+        log.info("Player slot=%s, team=%s", player_slot, team)
+
+        player_data = {}
+        if isinstance(match_json.get(team_key), list):
+            for p in match_json[team_key]:
+                if p.get("Account ID") == player_id:
+                    player_data = p
+                    break
+
+        prompt = build_system_prompt(
+            player_data, team, match_json,
+            rivals=match_rivals if match_rivals else None,
+        )
+        log.info("Sending LLM request — match_id=%d, hero=%s", match_id, cm.hero_name)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, analyze_match, prompt)
+        bot.usage.record_llm(user_id)
+        log.info(
+            "LLM response received — sections: %s", [k for k, v in result.items() if v]
+        )
+
+        embeds = build_analysis_embeds(result)
+        for embed in embeds:
+            await interaction.channel.send(embed=embed)
+        log.info("AI analysis embeds sent — %d embeds", len(embeds))
+    except Exception as e:
+        log.error("AI analysis failed — match_id=%d: %s", match_id, e, exc_info=True)
+        await interaction.channel.send(f"AI analysis failed: {e}")
+
+
 async def _fetch_page_details(
     page_matches: list,
     details: dict,
@@ -369,13 +658,13 @@ async def _fetch_page_details(
 
 
 async def _fetch_rivals(player_id: int) -> dict[int, dict]:
-    """Fetch 90-day peers and filter to frequent opponents (rivals).
+    """Fetch 365-day peers and filter to frequent opponents (rivals).
 
     Returns dict keyed by account_id with rival info.
     Failures return an empty dict silently.
     """
     try:
-        peers = await bot.client.fetch_peers_async(player_id, date=90)
+        peers = await bot.client.fetch_peers_async(player_id, date=365)
     except Exception:
         log.warning("Rivals fetch failed — player_id=%d", player_id, exc_info=True)
         return {}
@@ -383,7 +672,7 @@ async def _fetch_rivals(player_id: int) -> dict[int, dict]:
     rivals = {}
     for peer in peers:
         against_games = peer.get("against_games", 0)
-        if against_games > 3:
+        if against_games > 2:
             account_id = peer.get("account_id")
             if account_id:
                 rivals[account_id] = {
@@ -400,7 +689,7 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
 
     api_calls = 0
 
-    # Fire off rivals fetch in background (90-day peers, filtered to opponents)
+    # Fire off rivals fetch in background (365-day peers, filtered to opponents)
     rivals_task = asyncio.create_task(_fetch_rivals(player_id))
     bot.usage.record_api_calls(user_id, 1)  # rivals peers fetch
 
@@ -632,22 +921,30 @@ async def _run_info_session(interaction: discord.Interaction, player_id: int) ->
     except Exception:
         log.warning("Rivals task failed", exc_info=True)
 
-    # Cross-reference match players against rival list
+    # Cross-reference enemy players against rival list
     match_rivals = []
     if rivals:
         raw = bot.cache.get_raw(cm.match.match_id)
         if raw:
+            is_radiant = cm.match.is_radiant
             for p in raw.get("players", []):
+                # Only check opponents
+                p_is_radiant = p.get("player_slot", 0) < 128
+                if p_is_radiant == is_radiant:
+                    continue
                 acct = p.get("account_id")
                 if acct and acct in rivals:
                     hero_id = p.get("hero_id")
                     hero_name = bot.heroes.get(str(hero_id), "Unknown")
                     rival_info = rivals[acct]
+                    rt = p.get("rank_tier")
+                    rank = _map_rank_tier(rt, bot.rank_tiers) if isinstance(rt, int) else "Unranked"
                     match_rivals.append({
                         "personaname": rival_info["personaname"],
                         "hero_name": hero_name,
                         "against_games": rival_info["against_games"],
                         "against_win": rival_info["against_win"],
+                        "rank": rank,
                     })
 
     # Send rival embed if any found
@@ -949,6 +1246,15 @@ async def _info(interaction: discord.Interaction) -> None:
             "Show your last 20 matches with classification, stats, and graphs. "
             "React with a number to view match details, then with the brain emoji for AI analysis.\n"
             "API calls: **8+** (profile + W/L + recent + rivals + 5 match details per page)"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="/match <match_id>",
+        value=(
+            "View a specific match by ID. Shows detail stats, graph, rival detection, "
+            "and AI analysis. Auto-requests parsing if the match isn't parsed yet.\n"
+            "API calls: **3+** (match detail + rivals + parse if needed)"
         ),
         inline=False,
     )

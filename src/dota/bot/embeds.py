@@ -273,33 +273,38 @@ def build_rivals_embed(match_rivals: list[dict]) -> discord.Embed:
         your_wins = games - wins
         your_losses = wins
         pct = (your_wins / games * 100) if games > 0 else 0
+        rank = r.get("rank", "Unknown")
         lines.append(
-            f"**{name}** - {hero} - 3 Month Record: {your_wins}-{your_losses} ({pct:.0f}%)"
+            f"**{name}** (Rank: {rank}) - {hero} - {your_wins}W {your_losses}L ({pct:.0f}%)"
         )
 
-    return discord.Embed(
+    embed = discord.Embed(
         title="\u2694\ufe0f Rival(s) in Game",
         description="\n".join(lines),
         color=discord.Color.dark_red(),
     )
+    embed.set_footer(text="W/L over the last 12 months")
+    return embed
 
 
 def build_analysis_embeds(sections: dict[str, str]) -> list[discord.Embed]:
-    """Build up to 3 embeds from the structured LLM response."""
+    """Build up to 4 embeds from the structured LLM response."""
     embeds = []
 
     titles = {
         "match_summary": "\U0001f4ca Match Summary",
         "player_performance": "\U0001f3af Player Performance",
         "core_reasons": "\U0001f3c6 Core Reasons",
+        "rivals": "\u2694\ufe0f Rivals",
     }
     colors = {
         "match_summary": discord.Color.blue(),
         "player_performance": discord.Color.purple(),
         "core_reasons": discord.Color.gold(),
+        "rivals": discord.Color.dark_red(),
     }
 
-    for key in ("match_summary", "player_performance", "core_reasons"):
+    for key in ("match_summary", "player_performance", "core_reasons", "rivals"):
         text = sections.get(key, "")
         if not text:
             continue

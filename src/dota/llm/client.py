@@ -13,7 +13,7 @@ LOG_DIR = Path(".llm_logs")
 
 # Section headers the prompt asks for (case-insensitive match)
 _SECTION_PATTERN = re.compile(
-    r"^#\s+(Match Summary|Player Performance Analysis|Core Reasons)\s*$",
+    r"^#\s+(Match Summary|Player Performance Analysis|Core Reasons|Rivals)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -21,6 +21,7 @@ _HEADER_TO_KEY = {
     "match summary": "match_summary",
     "player performance analysis": "player_performance",
     "core reasons": "core_reasons",
+    "rivals": "rivals",
 }
 
 
@@ -33,11 +34,12 @@ def _log_prompt(system_prompt: str) -> None:
 
 
 def _parse_response(content: str) -> dict[str, str]:
-    """Split the markdown response by # headings into three sections."""
+    """Split the markdown response by # headings into sections."""
     sections: dict[str, str] = {
         "match_summary": "",
         "player_performance": "",
         "core_reasons": "",
+        "rivals": "",
     }
 
     # Find all section header positions

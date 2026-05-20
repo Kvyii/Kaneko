@@ -43,7 +43,8 @@ Response guidelines:
 - Keep each section to 5 core reasons or insights, prioritising the most impactful ones.
 - Report numbers in thousands using the k suffix (e.g. 1500 as 1.5k). One decimal place.
 - Mention player names in brackets. E.g. Hero (Player Name).
-- You MUST structure your response using exactly these three section headers (with the exact heading text):
+- You MUST structure your response using the following section headers (with the exact heading text).
+- The first three sections are always required.
 
 # Match Summary
 - Overall match dynamics and key turning points (use "Gold Advantage to Radiant (per Minute)" to identify momentum shifts).
@@ -76,18 +77,27 @@ Match data below:
 """
 
 
-def _build_nemesis_section(rivals: list[dict]) -> str:
-    """Build a nemesis context block for the LLM prompt."""
-    lines = ["Nemesis spotted:"]
+_RIVALS_INSTRUCTIONS = """You MUST also include the following fourth section:
+
+# Rivals
+- A rival is an opponent that the player repeatedly encounters over the last 12 months.
+- Give a brief insight about the rival dynamic: how the rival's hero pick interacts with the player's hero, whether the matchup favours the player or the rival, and any notable patterns from the game (e.g. did the rival dominate lane, feed, carry, etc.).
+- Keep it concise — one short paragraph per rival."""
+
+
+def _build_rivals_section(rivals: list[dict]) -> str:
+    """Build a rivals context block with instructions for the LLM prompt."""
+    lines = [_RIVALS_INSTRUCTIONS, "", "Rivals spotted:"]
     for r in rivals:
         games = r["against_games"]
         wins = r["against_win"]
         your_wins = games - wins
         your_losses = wins
         pct = (your_wins / games * 100) if games > 0 else 0
+        rank = r.get("rank", "Unknown")
         lines.append(
-            f"{r['personaname']} - {r['hero_name']}: "
-            f"3 Month Record: {your_wins}-{your_losses} ({pct:.0f}%)"
+            f"{r['personaname']} (Rank: {rank}) - {r['hero_name']}: "
+            f"{your_wins}W {your_losses}L ({pct:.0f}%)"
         )
     return "\n".join(lines)
 
@@ -124,10 +134,10 @@ def build_system_prompt(
     )
 
     if rivals:
-        nemesis_text = _build_nemesis_section(rivals)
+        rivals_text = _build_rivals_section(rivals)
         prompt = prompt.replace(
             "Match data below:",
-            nemesis_text + "\n\nMatch data below:",
+            rivals_text + "\n\nMatch data below:",
         )
 
     return prompt
